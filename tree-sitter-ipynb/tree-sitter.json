@@ -1,0 +1,23 @@
+{
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "authors": [
+      { "name": "aj" }
+    ],
+    "links": {
+      "repository": "https://github.com/ajbucci/tree-sitter-ipynb"
+    }
+  },
+  "grammars": [
+    {
+      "name": "ipynb",
+      "scope": "source.ipynb",
+      "path": ".",
+      "file-types": [],
+      "injection-regex": "^ipynb$",
+      "highlights": "queries/ipynb/highlights.scm",
+      "injections": "queries/ipynb/injections.scm"
+    }
+  ]
+}

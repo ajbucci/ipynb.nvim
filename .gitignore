@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+node_modules/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Tree-sitter compiled parsers (platform-specific)
+*.dylib
+*.so
+
+# Tree-sitter build artifacts and CLI
+tree-sitter-ipynb/tree-sitter
+tree-sitter-ipynb/node_modules/
+tree-sitter-ipynb/package-lock.json
+tree-sitter-ipynb/src/grammar.json
+tree-sitter-ipynb/src/node-types.json
+tree-sitter-ipynb/src/tree_sitter/alloc.h
+tree-sitter-ipynb/src/tree_sitter/array.h
+
+.ipynb_checkpoints/
+doc/tags

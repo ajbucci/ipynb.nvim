@@ -1,0 +1,563 @@
+*ipynb.txt*    Modal Jupyter notebook editor for Neovim
+
+==============================================================================
+CONTENTS                                                       *ipynb-contents*
+
+    1. Introduction ............................ |ipynb-introduction|
+    2. Setup ................................... |ipynb-setup|
+    3. Configuration ........................... |ipynb-config|
+    4. Keymaps ................................. |ipynb-keymaps|
+    5. Commands ................................ |ipynb-commands|
+    6. Troubleshooting ......................... |ipynb-troubleshooting|
+    7. Statusline .............................. |ipynb-statusline|
+
+==============================================================================
+INTRODUCTION                                               *ipynb-introduction*
+
+ipynb.nvim is a modal Jupyter notebook editor for Neovim.
+Requires Neovim 0.10+.
+
+Features:
+- Cell-based editing with floating windows for code isolation
+- Partial language server support (completion, diagnostics, go-to-definition,
+  references, rename, formatting) - most keymaps work but plugin compatibility varies
+- Jupyter kernel integration for code execution
+- Variable inspector using Jupyter inspect protocol (with auto-hover)
+- Multi-language support (Python, Julia, R, etc.)
+- Inline image rendering (requires snacks.nvim)
+- Cell folding to collapse cell content
+- Tree-sitter based syntax highlighting
+
+Open any .ipynb file and use `i` to edit cells, `]]`/`[[` to navigate.
+
+==============================================================================
+SETUP                                                             *ipynb-setup*
+
+                                                                 *ipynb.setup()*
+require('ipynb').setup({opts})
+
+    Call this in your Neovim configuration to enable ipynb.nvim.
+    The plugin will handle .ipynb files automatically.
+
+    Example with lazy.nvim: >lua
+        {
+            "ajbucci/ipynb.nvim",
+            dependencies = {
+                "nvim-treesitter/nvim-treesitter",
+                "neovim/nvim-lspconfig",
+            },
+            opts = {},
+        }
+<
+    The treesitter parser is automatically compiled on first load.
+    Example with defaults: >lua
+        require('ipynb').setup({
+            float = {
+                width = 0.9,
+                height = 0.7,
+                border = 'rounded',
+                overlay = true,
+            },
+            keymaps = {
+                next_cell = ']]',
+                prev_cell = '[[',
+                execute_cell = '<C-CR>',
+                execute_and_next = '<S-CR>',
+            },
+            kernel = {
+                auto_connect = false,
+                python_path = nil,
+            },
+            images = {
+                enabled = true,
+                max_height = 30,
+            },
+        })
+<
+    Parameters: ~
+        {opts}  (NotebookConfig|nil)  See |ipynb-config|
+
+==============================================================================
+CONFIGURATION                                                    *ipynb-config*
+
+Configuration is passed to |ipynb.setup()|. All fields are optional.
+
+NotebookConfig                                                  *NotebookConfig*
+
+    Fields: ~
+        {float}           (FloatConfig)          Edit float window settings
+        {keymaps}         (KeymapConfig)         Key bindings
+        {highlights}      (HighlightConfig)      Cell colors
+        {border_hints}    (BorderHintsConfig)    Action hints on cell borders
+        {kernel}          (KernelConfig)         Jupyter kernel settings
+        {images}          (ImageConfig)          Image rendering settings
+        {inspector}       (InspectorConfig)      Inspector settings
+        {folding}         (FoldingConfig)        Cell folding settings
+        {format}          (FormatConfig)         Cell formatting settings
+
+------------------------------------------------------------------------------
+FloatConfig                                                        *FloatConfig*
+
+    Fields: ~
+        {width}              (number)   Window width as fraction (0-1)
+                                        Default: 0.9
+        {height}             (number)   Window height as fraction (0-1)
+                                        Default: 0.7
+        {border}             (string)   Border style
+                                        Default: 'rounded'
+
+------------------------------------------------------------------------------
+KeymapConfig                                                      *KeymapConfig*
+
+    All keymaps can be customized or disabled (set to false).
+    Direct keys (i, a, o, O, <CR>, dd, p, P) are hardcoded for edit mode
+    entry and cell operations.
+
+    Where keymaps apply:
+    - [F] = Facade buffer only
+    - [E] = Edit float only
+    - [F+E] = Both facade and edit float
+
+    Direct keys (facade only): ~
+        {next_cell}            (string)  [F] Jump to next cell
+                                         Default: ']]'
+        {prev_cell}            (string)  [F] Jump to previous cell
+                                         Default: '[['
+        {cut_cell}             (string)  [F] Cut cell to register
+                                         Default: 'dd'
+        {paste_cell_below}     (string)  [F] Paste cell below
+                                         Default: 'p'
+        {paste_cell_above}     (string)  [F] Paste cell above
+                                         Default: 'P'
+        {move_cell_down}       (string)  [F] Move cell down
+                                         Default: '<M-j>'
+        {move_cell_up}         (string)  [F] Move cell up
+                                         Default: '<M-k>'
+        {execute_and_insert}   (string)  [F] Execute cell, insert below
+                                         Default: '<M-CR>'
+        {interrupt_kernel}     (string)  [F] Interrupt kernel
+                                         Default: '<C-c>'
+
+    Direct keys (both): ~
+        {execute_cell}         (string)  [F+E] Execute cell, stay
+                                         Default: '<C-CR>'
+        {execute_and_next}     (string)  [F+E] Execute cell, move next
+                                         Default: '<S-CR>'
+
+    <leader>k menu (both facade and edit): ~
+        {add_cell_above}       (string)  [F+E] Add cell above
+                                         Default: '<leader>ka'
+        {add_cell_below}       (string)  [F+E] Add cell below
+                                         Default: '<leader>kb'
+        {make_markdown}        (string)  [F+E] Make cell markdown
+                                         Default: '<leader>km'
+        {make_code}            (string)  [F+E] Make cell code
+                                         Default: '<leader>ky'
+        {make_raw}             (string)  [F+E] Make cell raw
+                                         Default: '<leader>kr'
+        {open_output}          (string)  [F+E] Open output in float
+                                         Default: '<leader>ko'
+        {clear_output}         (string)  [F+E] Clear cell output
+                                         Default: '<leader>kc'
+        {clear_all_outputs}    (string)  [F+E] Clear all outputs
+                                         Default: '<leader>kC'
+        {menu_execute_cell}    (string)  [F+E] Execute cell (menu)
+                                         Default: '<leader>kx'
+        {menu_execute_and_next}(string)  [F+E] Execute + next (menu)
+                                         Default: '<leader>kX'
+        {execute_all_below}    (string)  [F+E] Execute all below
+                                         Default: nil (unmapped)
+        {kernel_interrupt}     (string)  [F+E] Interrupt kernel
+                                         Default: '<leader>ki'
+        {kernel_restart}       (string)  [F+E] Restart kernel
+                                         Default: '<leader>k0'
+        {kernel_start}         (string)  [F+E] Start kernel
+                                         Default: '<leader>ks'
+        {kernel_shutdown}      (string)  [F+E] Shutdown kernel
+                                         Default: '<leader>kS'
+        {kernel_info}          (string)  [F+E] Show kernel info
+                                         Default: '<leader>kn'
+        {jump_to_cell}         (string)  [F+E] Open cell picker
+                                         Default: '<leader>kj'
+        {fold_toggle}          (string)  [F] Toggle cell fold
+                                         Default: '<leader>kf'
+
+    Inspector (both facade and edit): ~
+        {variable_inspect}     (string)  [F+E] Inspect variable at cursor
+                                         Default: '<leader>kh'
+        {cell_variables}       (string)  [F+E] Inspect all cell variables
+                                         Default: '<leader>kv'
+        {toggle_auto_hover}    (string)  [F+E] Toggle inspect auto-hover
+                                         Default: '<leader>kH'
+
+------------------------------------------------------------------------------
+HighlightConfig                                                *HighlightConfig*
+
+    Highlight groups to link to. Specify existing highlight group names
+    (from your colorscheme or custom definitions). This allows ipynb.nvim
+    to adapt to any colorscheme automatically.
+
+    To customize, either:
+    1. Set a different group to link to: >lua
+        highlights = { border = 'NonText' }
+<
+    2. Define the Ipynb* groups directly in your colorscheme or config: >lua
+        vim.api.nvim_set_hl(0, 'IpynbBorder', { fg = '#3e4452' })
+<
+    Fields: ~
+        {border}         (string)  Cell border color
+                                   Default: 'Comment'
+        {border_hover}   (string)  Border when cursor is on cell
+                                   Default: 'Special'
+        {border_active}  (string)  Border when editing in float
+                                   Default: 'Number'
+        {exec_count}     (string)  Execution count [N]
+                                   Default: 'Number'
+        {output}         (string)  Output text
+                                   Default: 'Comment'
+        {output_error}   (string)  Error output
+                                   Default: 'DiagnosticError'
+        {executing}      (string)  Executing indicator
+                                   Default: 'DiagnosticWarn'
+        {queued}         (string)  Queued indicator
+                                   Default: 'DiagnosticHint'
+        {hint}           (string)  Action hints on cell border
+                                   Default: 'Comment'
+
+------------------------------------------------------------------------------
+KernelConfig                                                      *KernelConfig*
+
+    Fields: ~
+        {auto_connect}  (boolean)     Auto-connect to kernel on open
+                                      Default: false
+        {show_status}   (boolean)     Show kernel status in statusline
+                                      Default: true
+        {python_path}   (string|nil)  Custom Python path for kernel bridge
+                                      Default: nil (auto-discovered)
+
+------------------------------------------------------------------------------
+ImageConfig                                                        *ImageConfig*
+
+    Requires snacks.nvim for inline image rendering in terminals that
+    support the kitty graphics protocol.
+
+    Fields: ~
+        {enabled}     (boolean)     Enable image rendering
+                                    Default: true
+        {cache_dir}   (string)      Directory to cache decoded images
+                                    Default: stdpath('cache') .. '/ipynb.nvim'
+        {max_width}   (number|nil)  Max width in columns (nil = auto)
+                                    Default: nil
+        {max_height}  (number|nil)  Max height in terminal rows (nil = auto)
+                                    Default: nil
+
+------------------------------------------------------------------------------
+InspectorConfig                                                *InspectorConfig*
+
+    Settings for the variable inspector floating window.
+
+    Fields: ~
+        {close}       (string|string[])  Keys to close inspector window
+                                         Default: { 'q', '<Esc>' }
+        {inspect}     (string|string[])  Keys to inspect variable under cursor
+                                         Default: { 'K', '<CR>' }
+        {auto_hover}  (AutoHoverConfig)  Auto-hover settings
+
+AutoHoverConfig                                                *AutoHoverConfig*
+
+    Settings for auto-hover, which displays variable info when cursor rests
+    on an identifier.
+
+    Fields: ~
+        {enabled}  (boolean)  Enable auto-hover on CursorHold
+                              Default: false
+        {delay}    (number)   Delay in ms before showing auto-hover
+                              Default: 500
+
+------------------------------------------------------------------------------
+FoldingConfig                                                    *FoldingConfig*
+
+    Settings for cell folding behavior.
+
+    Fields: ~
+        {hide_output}  (boolean)  Include end marker in fold to hide output
+                                  Default: false
+
+------------------------------------------------------------------------------
+FormatConfig                                                      *FormatConfig*
+
+    Settings for cell formatting behavior.
+
+    Fields: ~
+        {enabled}               (boolean) Wrap `vim.lsp.buf.format()` to work
+                                          with notebooks. When enabled, your
+                                          existing format keybindings will
+                                          automatically use notebook formatting.
+                                          Default: true
+        {trailing_blank_lines}  (number)  Max trailing blank lines to keep
+                                          after formatting. Formatters often
+                                          add trailing newlines; this trims
+                                          them. Default: 0
+
+------------------------------------------------------------------------------
+BorderHintsConfig                                            *BorderHintsConfig*
+
+    Settings for action hints displayed on the active cell border.
+
+    Fields: ~
+        {enabled}       (boolean)  Show action hints on active cell border
+                                   Default: true
+        {show_on_hover} (boolean)  Show hints when cursor is on cell
+                                   Default: true
+        {show_on_edit}  (boolean)  Show hints when editing in float
+                                   Default: true
+
+==============================================================================
+KEYMAPS                                                         *ipynb-keymaps*
+
+Keymaps are organized by where they apply:
+- [F] = Facade buffer only (navigation mode)
+- [E] = Edit float only
+- [F+E] = Both facade and edit float
+
+Facade-only (entering edit mode, cell operations): ~
+
+    These work only in the facade buffer.
+
+    `<CR>`       [F]   Edit cell (normal mode)
+    `i`          [F]   Edit cell (insert mode)
+    `a`          [F]   Edit cell (append)
+    `I`          [F]   Edit cell (insert at line start)
+    `A`          [F]   Edit cell (append at line end)
+    `o`          [F]   Edit cell (open line below)
+    `O`          [F]   Edit cell (open line above)
+    `dd`         [F]   Cut cell
+    `p`          [F]   Paste cell below
+    `P`          [F]   Paste cell above
+    `]]`         [F]   Jump to next cell
+    `[[`         [F]   Jump to previous cell
+    `<M-j>`      [F]   Move cell down
+    `<M-k>`      [F]   Move cell up
+    `<M-CR>`     [F]   Execute cell, insert below
+    `<C-c>`      [F]   Interrupt kernel
+
+Edit-only (float navigation): ~
+
+    These work only in the edit float.
+
+    `<Esc>`      [E]   Close float, return to facade
+    `<C-j>`      [E]   Edit next cell
+    `<C-k>`      [E]   Edit previous cell
+
+Both facade and edit float: ~
+
+    These work in both contexts.
+
+    `<S-CR>`     [F+E] Execute cell, move next
+    `<C-CR>`     [F+E] Execute cell, stay
+    `u`          [F+E] Undo (global)
+    `<C-r>`      [F+E] Redo (global)
+
+<leader>k menu (works in both facade and edit float): ~
+
+    `<leader>ka` [F+E] Add cell above
+    `<leader>kb` [F+E] Add cell below
+    `<leader>km` [F+E] Make markdown
+    `<leader>ky` [F+E] Make code
+    `<leader>kr` [F+E] Make raw
+    `<leader>ko` [F+E] Open output in float
+    `<leader>kc` [F+E] Clear cell output
+    `<leader>kC` [F+E] Clear all outputs
+    `<leader>kx` [F+E] Execute cell
+    `<leader>kX` [F+E] Execute cell, move next
+    `<leader>ki` [F+E] Interrupt kernel
+    `<leader>k0` [F+E] Restart kernel
+    `<leader>ks` [F+E] Start kernel
+    `<leader>kS` [F+E] Shutdown kernel
+    `<leader>kn` [F+E] Kernel info
+    `<leader>kj` [F+E] Jump to cell (picker)
+    `<leader>kf` [F]   Toggle cell fold (facade only)
+
+Inspector (works in both facade and edit float): ~
+
+    `<leader>kh` [F+E] Inspect variable
+    `<leader>kv` [F+E] Inspect cell
+    `<leader>kH` [F+E] Toggle inspect auto-hover
+
+LSP: ~
+
+    Partial language server support via shadow buffer. Most LSP keymaps
+    (`gd`, `gr`, `K`, rename, etc.) should work, but not all - compatibility
+    depends on your LSP plugins and configuration.
+
+    Supported LSP features:
+    - Diagnostics (errors, warnings inline)
+    - Completion (triggered with `<C-Space>` in edit float)
+    - Hover (`K`)
+    - Go to definition (`gd`)
+    - Go to references (`gr`)
+    - Rename (`vim.lsp.buf.rename()`)
+    - Formatting (`vim.lsp.buf.format()`)
+
+    Not supported: code actions (can span cell boundaries unsafely).
+
+==============================================================================
+COMMANDS                                                       *ipynb-commands*
+
+All commands are prefixed with `:Notebook` and operate on the current buffer.
+
+Cell Operations: ~
+
+    `:NotebookInsertCellBelow`     Insert a new cell below current
+    `:NotebookInsertCellAbove`     Insert a new cell above current
+    `:NotebookDeleteCell`          Delete the current cell
+    `:NotebookCutCell`             Cut cell to register
+    `:NotebookPasteCellBelow`      Paste cell below
+    `:NotebookPasteCellAbove`      Paste cell above
+    `:NotebookMoveCellUp`          Move current cell up
+    `:NotebookMoveCellDown`        Move current cell down
+    `:NotebookToggleCellType`      Toggle between code and markdown
+    `:NotebookMakeCode`            Convert cell to code
+    `:NotebookMakeMarkdown`        Convert cell to markdown
+    `:NotebookMakeRaw`             Convert cell to raw
+
+Execution: ~
+
+    `:NotebookExecuteCell`         Execute current cell, stay
+    `:NotebookExecuteAndNext`      Execute current cell, move to next
+    `:NotebookExecuteAllBelow`     Execute all cells from current to end
+
+Kernel: ~
+
+    `:NotebookKernelStart` [path]  Start kernel
+                                   Optional: path to Python interpreter
+    `:NotebookKernelConnect` {file}
+                                   Connect to existing kernel via connection file
+    `:NotebookKernelInterrupt`     Interrupt current execution
+    `:NotebookKernelRestart`       Restart kernel (clears outputs)
+    `:NotebookKernelShutdown`      Shutdown kernel
+    `:NotebookKernelStatus`        Show kernel connection status
+    `:NotebookSetKernel` {name}    Set kernel name in metadata
+                                   Example: julia-1.10, ir, python3
+    `:NotebookListKernels`         List available Jupyter kernels
+
+Output: ~
+
+    `:NotebookOutput`              Open cell output in floating buffer
+    `:NotebookClearOutput`         Clear current cell output
+    `:NotebookClearAllOutputs`     Clear all outputs
+
+Navigation: ~
+
+    `:NotebookJumpToCell`          Open cell picker
+                                   Uses vim.ui.select - works with dressing.nvim,
+                                   telescope, fzf-lua, or any vim.ui.select backend
+
+Formatting: ~
+
+    `:NotebookFormatCell`          Format current cell using LSP
+    `:NotebookFormatAll`           Format all code cells (processes bottom-to-top)
+
+    Note: `vim.lsp.buf.format()` is wrapped to work with notebooks automatically.
+    On the facade buffer it formats all cells; in the edit float it formats
+    the current cell. This means your existing format keybindings (e.g.,
+    `<leader>f`) will work seamlessly with notebooks.
+
+Folding: ~
+
+    `:NotebookFoldCell`            Toggle fold for current cell
+    `:NotebookFoldAll`             Fold all cells
+    `:NotebookUnfoldAll`           Unfold all cells
+
+Inspector: ~
+
+    `:NotebookInspect`             Inspect variable at cursor
+    `:NotebookInspectCell`         Show all variables in cell
+    `:NotebookToggleAutoHover`     Toggle auto-hover on CursorHold
+
+Other: ~
+
+    `:NotebookCreate` [path] [kernel]
+                                   Create a new notebook
+                                   If no path given, creates untitled.ipynb
+                                   (or untitled1.ipynb, etc. if file exists)
+                                   Optional kernel sets the kernelspec
+                                   Example: :NotebookCreate myfile julia-1.10
+    `:NotebookSave`                Save notebook to disk
+    `:NotebookInfo`                Show notebook and cell information
+
+==============================================================================
+TROUBLESHOOTING                                         *ipynb-troubleshooting*
+
+Health check ~
+
+    Run `:checkhealth ipynb` to verify all dependencies are properly
+    configured.
+
+Parser not found ~
+
+    The parser should auto-compile on first load. If it fails:
+    - Ensure nvim-treesitter is installed
+    - Run `:TSInstall! ipynb` to manually compile
+
+No LSP ~
+
+    Ensure you have a language server installed for the notebook's language.
+    Check `:LspInfo` while in the notebook to see attached clients.
+
+Kernel won't start ~
+
+    Check `:NotebookKernelStatus` for the Python path being used.
+    Ensure `jupyter_client` is installed: `pip install jupyter_client`
+    For non-Python kernels, ensure the kernel is installed (e.g., IJulia, IRkernel).
+
+Images not showing ~
+
+    Requires snacks.nvim and a terminal which fully supports the kitty graphics protocol
+    (kitty, Ghostty). For tmux, set `allow-passthrough=on`.
+
+==============================================================================
+STATUSLINE                                                   *ipynb-statusline*
+
+The plugin provides a statusline component showing kernel status with the
+notebook's language icon (from nvim-web-devicons).
+
+                                                     *ipynb.kernel.statusline()*
+require('ipynb.kernel').statusline()
+
+    Returns the kernel status string for use in statuslines.
+    Shows language icon + status: IDLE, BUSY, or DISC.
+    Returns empty string if not in a notebook buffer.
+
+                                              *ipynb.kernel.statusline_visible()*
+require('ipynb.kernel').statusline_visible()
+
+    Returns true if the statusline component should be shown.
+    Use as a condition function in lualine.
+
+                                                *ipynb.kernel.statusline_color()*
+require('ipynb.kernel').statusline_color()
+
+    Returns a color table for lualine based on kernel state.
+    Uses theme-aware colors:
+    - IDLE: DiagnosticOk (green)
+    - BUSY: DiagnosticWarn (yellow)
+    - DISC: DiagnosticError (red)
+
+Example with lualine: >lua
+    require("lualine").setup({
+        sections = {
+            lualine_x = {
+                {
+                    require("ipynb.kernel").statusline,
+                    cond = require("ipynb.kernel").statusline_visible,
+                    color = require("ipynb.kernel").statusline_color,
+                },
+            },
+        },
+    })
+<
+Disable with `kernel.show_status = false` in setup.
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:

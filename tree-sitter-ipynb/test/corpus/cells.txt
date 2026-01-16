@@ -1,0 +1,64 @@
+================================================================================
+Simple code cell
+================================================================================
+# <<ipynb_nvim:code>>
+print("hello")
+# <</ipynb_nvim>>
+--------------------------------------------------------------------------------
+
+(notebook
+  (cell
+    (code_cell
+      (cell_content
+        (content_line))
+      (cell_end))))
+
+================================================================================
+Simple markdown cell
+================================================================================
+# <<ipynb_nvim:markdown>>
+# Heading
+# <</ipynb_nvim>>
+--------------------------------------------------------------------------------
+
+(notebook
+  (cell
+    (markdown_cell
+      (cell_content
+        (content_line))
+      (cell_end))))
+
+================================================================================
+Multiple cells with blank lines between
+================================================================================
+# <<ipynb_nvim:markdown>>
+# Title
+# <</ipynb_nvim>>
+
+# <<ipynb_nvim:code>>
+code here
+# <</ipynb_nvim>>
+
+# <<ipynb_nvim:markdown>>
+# Footer
+# <</ipynb_nvim>>
+--------------------------------------------------------------------------------
+
+(notebook
+  (cell
+    (markdown_cell
+      (cell_content
+        (content_line))
+      (cell_end)))
+  (blank_line)
+  (cell
+    (code_cell
+      (cell_content
+        (content_line))
+      (cell_end)))
+  (blank_line)
+  (cell
+    (markdown_cell
+      (cell_content
+        (content_line))
+      (cell_end))))
