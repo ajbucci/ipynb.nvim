@@ -2,6 +2,19 @@
 
 local M = {}
 
+---Set lines on facade buffer, suppressing LSP change tracking errors
+---LSP change tracking fails because facade isn't registered with the shadow buffer's LSP clients
+---@param buf number Facade buffer
+---@param start_line number 0-indexed start line
+---@param end_line number 0-indexed end line (exclusive)
+---@param lines string[] New lines
+local function set_facade_lines(buf, start_line, end_line, lines)
+  local ok, err = pcall(vim.api.nvim_buf_set_lines, buf, start_line, end_line, false, lines)
+  if not ok and err and not err:match('_changetracking') then
+    error(err)
+  end
+end
+
 ---Create and configure the facade buffer
 ---@param state NotebookState
 ---@param buf number|nil Existing buffer to use, or nil to create new
@@ -26,7 +39,7 @@ function M.create(state, buf)
   -- Setting undolevels=-1 before the change prevents it from being undoable
   local old_undolevels = vim.bo[buf].undolevels
   vim.bo[buf].undolevels = -1
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  set_facade_lines(buf, 0, -1, lines)
   vim.bo[buf].undolevels = old_undolevels
   vim.bo[buf].modified = false
 
@@ -92,19 +105,6 @@ function M.create(state, buf)
   })
 
   return buf
-end
-
----Set lines on facade buffer, suppressing LSP change tracking errors
----LSP change tracking fails because facade isn't registered with the shadow buffer's LSP clients
----@param buf number Facade buffer
----@param start_line number 0-indexed start line
----@param end_line number 0-indexed end line (exclusive)
----@param lines string[] New lines
-local function set_facade_lines(buf, start_line, end_line, lines)
-  local ok, err = pcall(vim.api.nvim_buf_set_lines, buf, start_line, end_line, false, lines)
-  if not ok and err and not err:match('_changetracking') then
-    error(err)
-  end
 end
 
 ---Refresh the entire facade buffer from state
