@@ -71,6 +71,8 @@ end
 ---@param source_path string Path to .ipynb file
 ---@return NotebookState
 function M.create(source_path)
+  -- Normalize to absolute path for reliable saving
+  local abs_path = vim.fn.fnamemodify(source_path, ':p')
   local state = {
     cells = {},
     facade_buf = -1,
@@ -78,8 +80,8 @@ function M.create(source_path)
     facade_path = '',
     shadow_buf = nil,
     shadow_path = nil,
-    source_path = source_path,
-    namespace = vim.api.nvim_create_namespace('notebook_' .. source_path),
+    source_path = abs_path,
+    namespace = vim.api.nvim_create_namespace('notebook_' .. abs_path),
     edit_state = nil,
     kernel = nil,
     metadata = {},
