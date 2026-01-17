@@ -21,7 +21,7 @@ A modal Jupyter notebook editor for Neovim.
 
 The plugin uses a modal editing approach:
 
-- **Facade buffer**: A read-only view of your notebook for navigation between cells
+- **Navigation buffer**: A read-only view of your notebook for navigation between cells
 - **Cell buffers**: When you edit a cell, changes happen in an isolated buffer that overlays the cell
 - **Shadow buffer**: A hidden buffer containing only code cells, used for LSP communication
 
@@ -174,43 +174,43 @@ This updates the notebook metadata and re-attaches the appropriate LSP.
 ```lua
 require("ipynb").setup({
   keymaps = {
-    -- Navigation (facade buffer)
+    -- Navigation (navigation buffer)
     next_cell = "]]",              -- jump to next cell
     prev_cell = "[[",              -- jump to previous cell
-    -- Navigation (facade and edit buffers)
+    -- Navigation (navigation and edit buffers)
     jump_to_cell = "<leader>kj",   -- open cell picker
-    -- Cell operations (facade buffer)
+    -- Cell operations (navigation buffer)
     cut_cell = "dd",               -- cut cell to register
     paste_cell_below = "p",        -- paste cell below
     paste_cell_above = "P",        -- paste cell above
     move_cell_down = "<M-j>",      -- move cell down
     move_cell_up = "<M-k>",        -- move cell up
-    -- Cell operations (facade and edit buffers)
+    -- Cell operations (navigation and edit buffers)
     add_cell_above = "<leader>ka", -- insert cell above
     add_cell_below = "<leader>kb", -- insert cell below
     make_markdown = "<leader>km",  -- convert to markdown cell
     make_code = "<leader>ky",      -- convert to code cell
     make_raw = "<leader>kr",       -- convert to raw cell
     fold_toggle = "<leader>kf",    -- toggle cell fold
-    -- Execution (facade and edit buffers)
+    -- Execution (navigation and edit buffers)
     execute_cell = "<C-CR>",            -- execute cell, stay
     execute_and_next = "<S-CR>",        -- execute cell, move to next
     execute_and_insert = "<M-CR>",      -- execute cell, insert new below
     execute_all_below = nil,            -- execute current and all below (unmapped)
     menu_execute_cell = "<leader>kx",   -- execute cell (menu, if <C-CR> conflicts)
     menu_execute_and_next = "<leader>kX", -- execute and next (menu, if <S-CR> conflicts)
-    -- Output (facade and edit buffers)
+    -- Output (navigation and edit buffers)
     open_output = "<leader>ko",      -- open cell output in float (for copying)
     clear_output = "<leader>kc",     -- clear current cell output
     clear_all_outputs = "<leader>kC", -- clear all outputs
-    -- Kernel (facade and edit buffers)
+    -- Kernel (navigation and edit buffers)
     interrupt_kernel = "<C-c>",      -- interrupt execution
     kernel_interrupt = "<leader>ki", -- interrupt (menu)
     kernel_restart = "<leader>k0",   -- restart kernel
     kernel_start = "<leader>ks",     -- start kernel
     kernel_shutdown = "<leader>kS",  -- shutdown kernel
     kernel_info = "<leader>kn",      -- show kernel info
-    -- Inspector (facade and edit buffers)
+    -- Inspector (navigation and edit buffers)
     variable_inspect = "<leader>kh", -- inspect variable at cursor
     cell_variables = "<leader>kv",   -- show all variables in cell
     toggle_auto_hover = "<leader>kH", -- toggle auto-hover on CursorHold
