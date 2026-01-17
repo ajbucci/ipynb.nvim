@@ -641,10 +641,13 @@ function M.statusline(state)
 end
 
 ---Get highlight group for statusline state (for lualine color option)
----@param hl_state string|nil State: "disconnected", "busy", "ready"
+---@param hl_state string|nil State: "disconnected", "busy", "ready". If nil, auto-detects from current buffer.
 ---@return table color Lualine color table with fg from highlight group
 function M.statusline_color(hl_state)
-  hl_state = hl_state or 'disconnected'
+  if not hl_state then
+    local _, state = M.statusline()
+    hl_state = state
+  end
   local hl_map = {
     disconnected = 'DiagnosticError',
     busy = 'DiagnosticWarn',
