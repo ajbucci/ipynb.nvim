@@ -5,7 +5,7 @@ A modal Jupyter notebook editor for Neovim.
 > [!IMPORTANT]
 > `ipynb.nvim` is currently in **alpha**. There *will* be bugs!
 
-<!-- TODO: Add demo GIF -->
+<img width="752" height="517" alt="Screenshot From 2026-01-17 01-28-38" src="https://github.com/user-attachments/assets/6784bcce-ab98-4f5a-9383-567e252276bc" />
 
 ## ✨ Features
 
