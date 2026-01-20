@@ -40,6 +40,7 @@ local M = {}
 
 ---@class NotebookState
 ---@field cells Cell[]
+---@field cell_ids table<string, boolean> Set of cell IDs for collision avoidance
 ---@field facade_buf number
 ---@field facade_win number|nil
 ---@field facade_path string Original .ipynb file path (same as source_path)
@@ -57,14 +58,39 @@ local M = {}
 ---@type table<number, NotebookState>
 M.notebooks = {}
 
--- Counter for generating unique cell IDs
-local cell_id_counter = 0
+-- Word lists for human-readable cell IDs (JEP 62 Option D)
+local words = require('ipynb.words')
 
----Generate a unique cell ID
+-- Seed random once at module load
+math.randomseed(vim.loop.hrtime())
+
+---Generate a unique cell ID (nbformat 4.5+ compliant, JEP 62)
+---Format: {adjective}-{animal} e.g., "bold-fox", "azure-orca"
+---Per JEP 62: must match ^[a-zA-Z0-9-_]+$, length 1-64
+---755 adjectives × 320 animals = 241,600 combinations
+---@param existing_ids table<string, boolean>|nil Set of existing IDs to avoid collisions
 ---@return string
-function M.generate_cell_id()
-  cell_id_counter = cell_id_counter + 1
-  return string.format('cell_%d_%d', vim.loop.now(), cell_id_counter)
+function M.generate_cell_id(existing_ids)
+  local max_attempts = 100
+  for _ = 1, max_attempts do
+    local id = words.adjectives[math.random(#words.adjectives)]
+      .. '-' .. words.animals[math.random(#words.animals)]
+    if not existing_ids or not existing_ids[id] then
+      return id
+    end
+  end
+
+  -- Fallback: append integer suffix
+  local base = words.adjectives[math.random(#words.adjectives)]
+    .. '-' .. words.animals[math.random(#words.animals)]
+  if not existing_ids or not existing_ids[base] then
+    return base
+  end
+  local suffix = 1
+  while existing_ids[base .. '-' .. suffix] do
+    suffix = suffix + 1
+  end
+  return base .. '-' .. suffix
 end
 
 ---Create a new notebook state
@@ -75,6 +101,7 @@ function M.create(source_path)
   local abs_path = vim.fn.fnamemodify(source_path, ':p')
   local state = {
     cells = {},
+    cell_ids = {},
     facade_buf = -1,
     facade_win = nil,
     facade_path = '',
@@ -190,8 +217,11 @@ end
 ---@param cell_type "code" | "markdown" | "raw"
 ---@return number new_cell_idx
 function M.insert_cell(state, after_idx, cell_type)
+  local id = M.generate_cell_id(state.cell_ids)
+  state.cell_ids[id] = true
+
   local new_cell = {
-    id = M.generate_cell_id(),
+    id = id,
     type = cell_type,
     source = '',
     outputs = {},

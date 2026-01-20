@@ -25,23 +25,26 @@ end
 
 ---Create a default empty notebook structure
 ---@param kernel_name string|nil Kernel name (default: "python3")
----@return Cell[], table metadata
+---@return Cell[], table metadata, table<string, boolean> cell_ids
 function M.create_empty_notebook(kernel_name)
+  local id = state_mod.generate_cell_id()
+  local cell_ids = { [id] = true }
   local cells = {
     {
-      id = state_mod.generate_cell_id(),
+      id = id,
       type = 'code',
       source = '',
       metadata = {},
       outputs = {},
     },
   }
-  return cells, M.default_metadata(kernel_name)
+  return cells, M.default_metadata(kernel_name), cell_ids
 end
 
 ---Parse a .ipynb JSON file into cells
+---Auto-upgrades to nbformat 4.5 and ensures all cells have IDs (per JEP 62)
 ---@param path string Path to .ipynb file
----@return Cell[], table metadata
+---@return Cell[], table metadata, table<string, boolean> cell_ids
 function M.read_ipynb(path)
   local content = vim.fn.readfile(path)
   local json_str = table.concat(content, '\n')
@@ -51,6 +54,15 @@ function M.read_ipynb(path)
     error('Failed to parse notebook JSON: ' .. tostring(notebook))
   end
 
+  -- First pass: collect existing cell IDs for collision avoidance
+  local existing_ids = {}
+  for _, nb_cell in ipairs(notebook.cells or {}) do
+    if nb_cell.id then
+      existing_ids[nb_cell.id] = true
+    end
+  end
+
+  -- Second pass: build cells, generating IDs for those without
   local cells = {}
   for _, nb_cell in ipairs(notebook.cells or {}) do
     -- Source can be string or array of strings
@@ -60,8 +72,15 @@ function M.read_ipynb(path)
       source = table.concat(source, '')
     end
 
+    -- Preserve original cell ID, or generate new one avoiding collisions
+    local id = nb_cell.id
+    if not id then
+      id = state_mod.generate_cell_id(existing_ids)
+      existing_ids[id] = true
+    end
+
     local cell = {
-      id = state_mod.generate_cell_id(),
+      id = id,
       type = nb_cell.cell_type or 'code',
       source = source,
       metadata = nb_cell.metadata or {},
@@ -71,17 +90,46 @@ function M.read_ipynb(path)
     table.insert(cells, cell)
   end
 
-  -- Extract notebook metadata (with defaults for missing fields)
+  -- Extract notebook metadata, preserving ALL fields (Colab, Kaggle, widgets, etc.)
   local default = M.default_metadata()
   local nb_meta = notebook.metadata or {}
-  local metadata = {
-    kernelspec = nb_meta.kernelspec or default.kernelspec,
-    language_info = nb_meta.language_info or default.language_info,
-    nbformat = notebook.nbformat or default.nbformat,
-    nbformat_minor = notebook.nbformat_minor or default.nbformat_minor,
-  }
 
-  return cells, metadata
+  -- Start with all original metadata, then ensure required fields have defaults
+  local metadata = vim.tbl_deep_extend('keep', nb_meta, {
+    kernelspec = default.kernelspec,
+    language_info = default.language_info,
+  })
+
+  -- Auto-upgrade to nbformat 4.5 (cell IDs required per JEP 62)
+  metadata.nbformat = notebook.nbformat or default.nbformat
+  metadata.nbformat_minor = math.max(notebook.nbformat_minor or 0, 5)
+
+  return cells, metadata, existing_ids
+end
+
+---Split source string into array of lines (matches nbformat/splitlines behavior)
+---@param source string
+---@return string[]
+local function split_source(source)
+  if source == '' then
+    return {}
+  end
+
+  local source_lines = {}
+  local lines = vim.split(source, '\n', { plain = true })
+
+  for i, line in ipairs(lines) do
+    if i < #lines then
+      -- Not the last element - add newline back
+      table.insert(source_lines, line .. '\n')
+    elseif line ~= '' then
+      -- Last element: only include if non-empty
+      -- (empty last element means source ended with \n, already captured above)
+      table.insert(source_lines, line)
+    end
+  end
+
+  return source_lines
 end
 
 ---Write cells back to .ipynb format
@@ -89,19 +137,27 @@ end
 ---@param cells Cell[]
 ---@param metadata table|nil Notebook metadata
 function M.write_ipynb(path, cells, metadata)
+  -- Collect existing IDs for collision avoidance (safety net for missing IDs)
+  local existing_ids = {}
+  for _, cell in ipairs(cells) do
+    if cell.id then
+      existing_ids[cell.id] = true
+    end
+  end
+
   local nb_cells = {}
   for _, cell in ipairs(cells) do
-    -- Split source into array of lines (ipynb format)
-    local source_lines = {}
-    for line in (cell.source .. '\n'):gmatch('([^\n]*)\n') do
-      table.insert(source_lines, line .. '\n')
-    end
-    -- Remove trailing newline from last line
-    if #source_lines > 0 then
-      source_lines[#source_lines] = source_lines[#source_lines]:gsub('\n$', '')
+    local source_lines = split_source(cell.source)
+
+    -- Use existing ID, or generate if missing (safety net)
+    local id = cell.id
+    if not id then
+      id = state_mod.generate_cell_id(existing_ids)
+      existing_ids[id] = true
     end
 
     local nb_cell = {
+      id = id,
       cell_type = cell.type,
       source = source_lines,
       metadata = cell.metadata or {},
@@ -116,12 +172,25 @@ function M.write_ipynb(path, cells, metadata)
   end
 
   local default = M.default_metadata()
+
+  -- Preserve ALL metadata fields (Colab, Kaggle, widgets, custom fields, etc.)
+  -- Only nbformat/nbformat_minor are top-level; everything else goes in metadata
+  local nb_metadata = {}
+  if metadata then
+    for k, v in pairs(metadata) do
+      if k ~= 'nbformat' and k ~= 'nbformat_minor' then
+        nb_metadata[k] = v
+      end
+    end
+  end
+
+  -- Ensure required fields have defaults
+  nb_metadata.kernelspec = nb_metadata.kernelspec or default.kernelspec
+  nb_metadata.language_info = nb_metadata.language_info or default.language_info
+
   local notebook = {
     cells = nb_cells,
-    metadata = {
-      kernelspec = metadata and metadata.kernelspec or default.kernelspec,
-      language_info = metadata and metadata.language_info or default.language_info,
-    },
+    metadata = nb_metadata,
     nbformat = metadata and metadata.nbformat or default.nbformat,
     nbformat_minor = metadata and metadata.nbformat_minor or default.nbformat_minor,
   }
@@ -223,15 +292,15 @@ end
 ---@param buf number Buffer to populate
 ---@param path string Path to .ipynb file
 function M.open_notebook(buf, path)
-  local cells, metadata
+  local cells, metadata, cell_ids
 
   -- Check if file exists
   if vim.fn.filereadable(path) == 1 then
     -- Read existing notebook
-    cells, metadata = M.read_ipynb(path)
+    cells, metadata, cell_ids = M.read_ipynb(path)
   else
     -- Create new empty notebook
-    cells, metadata = M.create_empty_notebook()
+    cells, metadata, cell_ids = M.create_empty_notebook()
     vim.notify('New notebook: ' .. vim.fn.fnamemodify(path, ':t'), vim.log.levels.INFO)
   end
 
@@ -239,6 +308,7 @@ function M.open_notebook(buf, path)
   local state = state_mod.create(path)
   state.cells = cells
   state.metadata = metadata
+  state.cell_ids = cell_ids
 
   -- Create facade buffer
   local facade = require('ipynb.facade')
