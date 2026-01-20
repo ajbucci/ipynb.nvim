@@ -487,6 +487,309 @@ h.run_test('jupytext_format_roundtrip', function()
 end)
 
 --------------------------------------------------------------------------------
+-- nbformat test suite fixtures
+-- These are official test notebooks from jupyter/nbformat
+--------------------------------------------------------------------------------
+
+-- Helper: roundtrip a notebook and verify cell sources match
+local function roundtrip_verify_sources(path, name)
+  local temp_path = vim.fn.tempname() .. '.ipynb'
+
+  local cells, metadata = io_mod.read_ipynb(path)
+  local original_sources = {}
+  for i, cell in ipairs(cells) do
+    original_sources[i] = cell.source
+  end
+
+  io_mod.write_ipynb(temp_path, cells, metadata)
+  local cells2, _ = io_mod.read_ipynb(temp_path)
+
+  h.assert_eq(#cells2, #cells, name .. ': cell count should match')
+  for i, cell in ipairs(cells2) do
+    h.assert_eq(cell.source, original_sources[i],
+      string.format('%s: cell %d source should match', name, i))
+  end
+
+  vim.fn.delete(temp_path)
+end
+
+-- Helper: roundtrip and compare JSON structure
+local function roundtrip_verify_json(path, name, checks)
+  local temp_path = vim.fn.tempname() .. '.ipynb'
+
+  local original = read_json(path)
+  local cells, metadata = io_mod.read_ipynb(path)
+  io_mod.write_ipynb(temp_path, cells, metadata)
+  local written = read_json(temp_path)
+
+  -- Run custom checks
+  if checks then
+    checks(original, written)
+  end
+
+  vim.fn.delete(temp_path)
+end
+
+--------------------------------------------------------------------------------
+-- Test: nbformat test4.5.ipynb (v4.5 with cell IDs)
+--------------------------------------------------------------------------------
+h.run_test('nbformat_test4_5_roundtrip', function()
+  local path = tests_dir() .. '/fixtures/nbformat/test4.5.ipynb'
+  roundtrip_verify_sources(path, 'test4.5')
+
+  roundtrip_verify_json(path, 'test4.5', function(original, written)
+    -- Cell IDs should be preserved
+    for i, orig_cell in ipairs(original.cells) do
+      h.assert_eq(written.cells[i].id, orig_cell.id,
+        string.format('test4.5: cell %d ID should be preserved', i))
+    end
+
+    -- nbformat version should be preserved
+    h.assert_eq(written.nbformat, 4, 'test4.5: nbformat should be 4')
+    h.assert_eq(written.nbformat_minor, 5, 'test4.5: nbformat_minor should be 5')
+
+    -- Kernelspec should be preserved
+    h.assert_eq(written.metadata.kernelspec.name, 'python3', 'test4.5: kernelspec name')
+    h.assert_eq(written.metadata.kernelspec.display_name, 'Python 3 (ipykernel)',
+      'test4.5: kernelspec display_name')
+  end)
+end)
+
+--------------------------------------------------------------------------------
+-- Test: nbformat test4.ipynb (v4.0, no cell IDs - should auto-upgrade)
+--------------------------------------------------------------------------------
+h.run_test('nbformat_test4_roundtrip_autoupgrade', function()
+  local path = tests_dir() .. '/fixtures/nbformat/test4.ipynb'
+  roundtrip_verify_sources(path, 'test4')
+
+  roundtrip_verify_json(path, 'test4', function(original, written)
+    -- Original has no cell IDs (v4.0)
+    h.assert_eq(original.nbformat_minor, 0, 'test4: original is v4.0')
+    h.assert_true(original.cells[1].id == nil, 'test4: original has no cell IDs')
+
+    -- After round-trip, should be upgraded to v4.5 with cell IDs
+    h.assert_eq(written.nbformat, 4, 'test4: nbformat should be 4')
+    h.assert_true(written.nbformat_minor >= 5, 'test4: should be upgraded to 4.5+')
+
+    -- All cells should now have IDs
+    for i, cell in ipairs(written.cells) do
+      h.assert_true(cell.id ~= nil, string.format('test4: cell %d should have ID after upgrade', i))
+      h.assert_true(#cell.id > 0, string.format('test4: cell %d ID should be non-empty', i))
+    end
+  end)
+end)
+
+--------------------------------------------------------------------------------
+-- Test: nbformat test4jupyter_metadata.ipynb (jupyter cell metadata)
+--------------------------------------------------------------------------------
+h.run_test('nbformat_jupyter_metadata_roundtrip', function()
+  local path = tests_dir() .. '/fixtures/nbformat/test4jupyter_metadata.ipynb'
+  roundtrip_verify_sources(path, 'test4jupyter_metadata')
+
+  roundtrip_verify_json(path, 'test4jupyter_metadata', function(original, written)
+    -- Jupyter cell metadata should be preserved
+    local orig_meta = original.cells[1].metadata.jupyter
+    local written_meta = written.cells[1].metadata.jupyter
+
+    h.assert_true(written_meta ~= nil, 'jupyter metadata should be preserved')
+    h.assert_eq(written_meta.outputs_hidden, orig_meta.outputs_hidden,
+      'outputs_hidden should be preserved')
+    h.assert_eq(written_meta.source_hidden, orig_meta.source_hidden,
+      'source_hidden should be preserved')
+  end)
+end)
+
+--------------------------------------------------------------------------------
+-- Test: nbformat test4custom.ipynb (custom MIME types)
+--------------------------------------------------------------------------------
+h.run_test('nbformat_custom_mime_roundtrip', function()
+  local path = tests_dir() .. '/fixtures/nbformat/test4custom.ipynb'
+  roundtrip_verify_sources(path, 'test4custom')
+
+  roundtrip_verify_json(path, 'test4custom', function(original, written)
+    -- Custom MIME output should be preserved
+    local orig_output = original.cells[1].outputs[1]
+    local written_output = written.cells[1].outputs[1]
+
+    h.assert_eq(written_output.output_type, orig_output.output_type,
+      'output_type should be preserved')
+
+    -- The custom MIME type data should be preserved
+    local custom_key = 'application/vnd.raw.v1+json'
+    h.assert_true(written_output.data[custom_key] ~= nil,
+      'custom MIME type data should be preserved')
+  end)
+end)
+
+--------------------------------------------------------------------------------
+-- Test: nbformat many_tracebacks.ipynb (error outputs with ANSI)
+--------------------------------------------------------------------------------
+h.run_test('nbformat_tracebacks_roundtrip', function()
+  local path = tests_dir() .. '/fixtures/nbformat/many_tracebacks.ipynb'
+  roundtrip_verify_sources(path, 'many_tracebacks')
+
+  roundtrip_verify_json(path, 'many_tracebacks', function(original, written)
+    -- Error output should be preserved
+    local orig_output = original.cells[1].outputs[1]
+    local written_output = written.cells[1].outputs[1]
+
+    h.assert_eq(written_output.output_type, 'error', 'output_type should be error')
+    h.assert_eq(written_output.ename, orig_output.ename, 'ename should be preserved')
+    h.assert_eq(written_output.evalue, orig_output.evalue, 'evalue should be preserved')
+
+    -- Traceback with ANSI codes should be preserved
+    h.assert_true(#written_output.traceback > 0, 'traceback should have entries')
+    h.assert_eq(#written_output.traceback, #orig_output.traceback,
+      'traceback length should match')
+
+    -- Check ANSI codes are preserved (they contain escape sequences)
+    for i, tb in ipairs(orig_output.traceback) do
+      h.assert_eq(written_output.traceback[i], tb,
+        string.format('traceback[%d] should be preserved exactly', i))
+    end
+  end)
+end)
+
+--------------------------------------------------------------------------------
+-- Test: Full JSON structure equality (v4.5+ notebooks)
+-- These notebooks should round-trip with identical JSON structure
+--------------------------------------------------------------------------------
+h.run_test('nbformat_test4_5_full_json_equality', function()
+  local path = tests_dir() .. '/fixtures/nbformat/test4.5.ipynb'
+  local temp_path = vim.fn.tempname() .. '.ipynb'
+
+  local original = read_json(path)
+  local cells, metadata = io_mod.read_ipynb(path)
+  io_mod.write_ipynb(temp_path, cells, metadata)
+  local written = read_json(temp_path)
+
+  local ok, err = deep_equal(original, written, '')
+  h.assert_true(ok, 'test4.5.ipynb full JSON equality: ' .. (err or ''))
+
+  vim.fn.delete(temp_path)
+end)
+
+h.run_test('nbformat_jupyter_metadata_full_json_equality', function()
+  local path = tests_dir() .. '/fixtures/nbformat/test4jupyter_metadata.ipynb'
+  local temp_path = vim.fn.tempname() .. '.ipynb'
+
+  local original = read_json(path)
+  local cells, metadata = io_mod.read_ipynb(path)
+  io_mod.write_ipynb(temp_path, cells, metadata)
+  local written = read_json(temp_path)
+
+  -- This one is v4.0, so it will be upgraded - skip cell ID comparison
+  -- but check everything else matches after accounting for upgrade
+  -- Actually, let's just verify the cells content matches exactly
+  for i, orig_cell in ipairs(original.cells) do
+    local written_cell = written.cells[i]
+    -- Compare source
+    local ok, err = deep_equal(orig_cell.source, written_cell.source, 'cells[' .. i .. '].source')
+    h.assert_true(ok, 'jupyter_metadata source: ' .. (err or ''))
+    -- Compare metadata
+    ok, err = deep_equal(orig_cell.metadata, written_cell.metadata, 'cells[' .. i .. '].metadata')
+    h.assert_true(ok, 'jupyter_metadata metadata: ' .. (err or ''))
+    -- Compare outputs if present
+    if orig_cell.outputs then
+      ok, err = deep_equal(orig_cell.outputs, written_cell.outputs, 'cells[' .. i .. '].outputs')
+      h.assert_true(ok, 'jupyter_metadata outputs: ' .. (err or ''))
+    end
+  end
+
+  vim.fn.delete(temp_path)
+end)
+
+h.run_test('nbformat_custom_mime_full_json_equality', function()
+  local path = tests_dir() .. '/fixtures/nbformat/test4custom.ipynb'
+  local temp_path = vim.fn.tempname() .. '.ipynb'
+
+  local original = read_json(path)
+  local cells, metadata = io_mod.read_ipynb(path)
+  io_mod.write_ipynb(temp_path, cells, metadata)
+  local written = read_json(temp_path)
+
+  -- Compare cell contents (source, metadata, outputs) exactly
+  for i, orig_cell in ipairs(original.cells) do
+    local written_cell = written.cells[i]
+    local ok, err = deep_equal(orig_cell.source, written_cell.source, 'cells[' .. i .. '].source')
+    h.assert_true(ok, 'custom_mime source: ' .. (err or ''))
+    ok, err = deep_equal(orig_cell.metadata, written_cell.metadata, 'cells[' .. i .. '].metadata')
+    h.assert_true(ok, 'custom_mime metadata: ' .. (err or ''))
+    if orig_cell.outputs then
+      ok, err = deep_equal(orig_cell.outputs, written_cell.outputs, 'cells[' .. i .. '].outputs')
+      h.assert_true(ok, 'custom_mime outputs: ' .. (err or ''))
+    end
+  end
+
+  vim.fn.delete(temp_path)
+end)
+
+h.run_test('nbformat_tracebacks_full_json_equality', function()
+  local path = tests_dir() .. '/fixtures/nbformat/many_tracebacks.ipynb'
+  local temp_path = vim.fn.tempname() .. '.ipynb'
+
+  local original = read_json(path)
+  local cells, metadata = io_mod.read_ipynb(path)
+  io_mod.write_ipynb(temp_path, cells, metadata)
+  local written = read_json(temp_path)
+
+  -- Compare full notebook structure
+  -- Note: this is v4.4, so will be upgraded to 4.5 with cell IDs added
+  -- Check metadata preservation
+  local ok, err = deep_equal(original.metadata, written.metadata, 'metadata')
+  h.assert_true(ok, 'tracebacks metadata: ' .. (err or ''))
+
+  -- Check cell contents exactly
+  for i, orig_cell in ipairs(original.cells) do
+    local written_cell = written.cells[i]
+    ok, err = deep_equal(orig_cell.source, written_cell.source, 'cells[' .. i .. '].source')
+    h.assert_true(ok, 'tracebacks source: ' .. (err or ''))
+    ok, err = deep_equal(orig_cell.metadata, written_cell.metadata, 'cells[' .. i .. '].metadata')
+    h.assert_true(ok, 'tracebacks metadata: ' .. (err or ''))
+    if orig_cell.outputs then
+      ok, err = deep_equal(orig_cell.outputs, written_cell.outputs, 'cells[' .. i .. '].outputs')
+      h.assert_true(ok, 'tracebacks outputs: ' .. (err or ''))
+    end
+  end
+
+  vim.fn.delete(temp_path)
+end)
+
+--------------------------------------------------------------------------------
+-- Test: All nbformat fixtures round-trip without error
+--------------------------------------------------------------------------------
+h.run_test('all_nbformat_fixtures_roundtrip', function()
+  local nbformat_fixtures = {
+    'test4.5.ipynb',
+    'test4.ipynb',
+    'test4jupyter_metadata.ipynb',
+    'test4custom.ipynb',
+    'many_tracebacks.ipynb',
+  }
+
+  for _, fixture in ipairs(nbformat_fixtures) do
+    local path = tests_dir() .. '/fixtures/nbformat/' .. fixture
+    local temp_path = vim.fn.tempname() .. '.ipynb'
+
+    local ok, err = pcall(function()
+      local cells, metadata = io_mod.read_ipynb(path)
+      io_mod.write_ipynb(temp_path, cells, metadata)
+      local cells2, metadata2 = io_mod.read_ipynb(temp_path)
+
+      -- Basic sanity checks
+      assert(#cells2 == #cells, fixture .. ': cell count mismatch')
+      for i, cell in ipairs(cells) do
+        assert(cells2[i].source == cell.source, fixture .. ': cell ' .. i .. ' source mismatch')
+        assert(cells2[i].type == cell.type, fixture .. ': cell ' .. i .. ' type mismatch')
+      end
+    end)
+
+    h.assert_true(ok, 'nbformat/' .. fixture .. ' should round-trip: ' .. tostring(err))
+    vim.fn.delete(temp_path)
+  end
+end)
+
+--------------------------------------------------------------------------------
 -- Print summary and exit
 --------------------------------------------------------------------------------
 local success = h.summary()

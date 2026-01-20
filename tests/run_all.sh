@@ -33,6 +33,7 @@ run_test_file() {
 run_test_file "tests/test_cells.lua"
 run_test_file "tests/test_modified.lua"
 run_test_file "tests/test_undo.lua"
+run_test_file "tests/test_io.lua"
 
 # LSP tests - will skip gracefully if no LSP server available
 run_test_file "tests/test_lsp.lua"
