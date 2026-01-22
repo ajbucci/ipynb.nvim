@@ -517,28 +517,30 @@ function M.setup_cursor_sync(state)
     group = group,
     buffer = edit.buf,
     callback = function()
-      -- Use current edit_state for fresh window/position references
-      if not state.edit_state then
-        return
-      end
-      local current_edit = state.edit_state --[[@as EditState]]
-      if not vim.api.nvim_win_is_valid(current_edit.parent_win) then
-        return
-      end
-      if not vim.api.nvim_win_is_valid(current_edit.win) then
-        return
-      end
+      -- Defer to let facade sync complete first (terminal paste can cause rapid events)
+      vim.schedule(function()
+        if not state.edit_state then
+          return
+        end
+        local current_edit = state.edit_state --[[@as EditState]]
+        if not vim.api.nvim_win_is_valid(current_edit.parent_win) then
+          return
+        end
+        if not vim.api.nvim_win_is_valid(current_edit.win) then
+          return
+        end
 
-      -- Get cursor position in edit buffer (1-indexed)
-      local edit_cursor = vim.api.nvim_win_get_cursor(current_edit.win)
-      local edit_line = edit_cursor[1]
-      local edit_col = edit_cursor[2]
+        -- Get cursor position in edit buffer (1-indexed)
+        local edit_cursor = vim.api.nvim_win_get_cursor(current_edit.win)
+        local edit_line = edit_cursor[1]
+        local edit_col = edit_cursor[2]
 
-      -- Translate to facade position
-      local facade_line = current_edit.start_line + edit_line -- start_line is 0-indexed, edit_line is 1-indexed
+        -- Translate to facade position
+        local facade_line = current_edit.start_line + edit_line -- start_line is 0-indexed, edit_line is 1-indexed
 
-      -- Update facade cursor without changing focus
-      vim.api.nvim_win_set_cursor(current_edit.parent_win, { facade_line, edit_col })
+        -- Update facade cursor without changing focus
+        vim.api.nvim_win_set_cursor(current_edit.parent_win, { facade_line, edit_col })
+      end)
     end,
   })
 end
