@@ -889,7 +889,7 @@ LSP code actions (`textDocument/codeAction`) are intentionally not supported bec
 - The complexity of safely handling cross-cell modifications is high
 - Users can still run code actions manually in the shadow buffer if needed
 
-**Not Tested (may or may not work):**
+🚧 **Not Tested (may or may not work):**
 
 - `textDocument/semanticTokens`
 - `textDocument/codeLens`

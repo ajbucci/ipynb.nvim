@@ -35,6 +35,23 @@ local function lsp_available()
   return has_lsp
 end
 
+-- Helper: check if any client supports a method
+local function lsp_supports_method(state, method)
+  local clients = vim.lsp.get_clients({ bufnr = state.shadow_buf })
+  for _, client in ipairs(clients) do
+    if client.supports_method then
+      local ok = client:supports_method(method, { bufnr = state.shadow_buf })
+      if ok then
+        return true
+      end
+      if client:supports_method(method) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 -- Check LSP availability once
 local HAS_LSP = lsp_available()
 if not HAS_LSP then
@@ -238,6 +255,56 @@ h.run_test('buf_request_redirects_to_shadow', function()
   h.assert_true(got_response, 'Should get response from buf_request')
   -- Note: err might be nil (success) or contain method not supported
   -- Either is fine - we just want to verify the request went through
+end)
+
+--------------------------------------------------------------------------------
+-- Test: documentSymbol URIs rewritten to facade
+--------------------------------------------------------------------------------
+h.run_test('document_symbol_uris_facade', function()
+  h.open_notebook('lsp_test.ipynb')
+  h.assert_true(wait_for_lsp(), 'LSP should attach')
+
+  local state = h.get_state()
+  if not lsp_supports_method(state, 'textDocument/documentSymbol') then
+    print('  SKIP: documentSymbol not supported by LSP')
+    return
+  end
+
+  local got_result = false
+  local symbol_result = nil
+
+  vim.lsp.buf_request(state.facade_buf, 'textDocument/documentSymbol', {
+    textDocument = { uri = vim.uri_from_fname(state.facade_path) },
+  }, function(err, result)
+    got_result = true
+    symbol_result = result
+  end)
+
+  vim.wait(5000, function() return got_result end, 100)
+
+  h.assert_true(got_result, 'Should get documentSymbol response')
+  h.assert_true(symbol_result ~= nil, 'DocumentSymbol result should not be nil')
+
+  -- Ensure at least one symbol has facade URI
+  local facade_uri = vim.uri_from_fname(state.facade_path)
+  local found = false
+  local function walk(obj)
+    if type(obj) ~= 'table' then
+      return
+    end
+    if obj.uri == facade_uri then
+      found = true
+      return
+    end
+    for _, v in pairs(obj) do
+      if found then
+        return
+      end
+      walk(v)
+    end
+  end
+  walk(symbol_result)
+  h.assert_true(found, 'DocumentSymbol URIs should be rewritten to facade')
 end)
 
 --------------------------------------------------------------------------------
@@ -462,6 +529,143 @@ h.run_test('hover_from_edit', function()
   h.assert_true(got_result, 'Should get hover response from edit buffer')
 
   h.exit_cell()
+end)
+
+--------------------------------------------------------------------------------
+-- Test: Document highlight handler uses facade buffer
+--------------------------------------------------------------------------------
+h.run_test('document_highlight_facade_handler', function()
+  h.open_notebook('lsp_test.ipynb')
+  h.assert_true(wait_for_lsp(), 'LSP should attach')
+
+  local state = h.get_state()
+  if not lsp_supports_method(state, 'textDocument/documentHighlight') then
+    print('  SKIP: documentHighlight not supported by LSP')
+    return
+  end
+
+  -- Position cursor on "hello"
+  local cells_mod = require('ipynb.cells')
+  local content_start, _ = cells_mod.get_content_range(state, 1)
+  vim.api.nvim_win_set_cursor(0, { content_start + 1, 4 })
+
+  local orig_handler = vim.lsp.handlers['textDocument/documentHighlight']
+  if not orig_handler then
+    print('  SKIP: documentHighlight handler not available')
+    return
+  end
+
+  local seen_bufnr = nil
+  vim.lsp.handlers['textDocument/documentHighlight'] = function(err, result, ctx, config)
+    if ctx and ctx.bufnr then
+      seen_bufnr = ctx.bufnr
+    end
+    return orig_handler(err, result, ctx, config)
+  end
+
+  local params = vim.lsp.util.make_position_params()
+  vim.lsp.buf_request(state.facade_buf, 'textDocument/documentHighlight', params, nil)
+
+  vim.wait(5000, function() return seen_bufnr ~= nil end, 100)
+
+  -- Restore handler
+  vim.lsp.handlers['textDocument/documentHighlight'] = orig_handler
+
+  h.assert_eq(seen_bufnr, state.facade_buf, 'DocumentHighlight should target facade buffer')
+end)
+
+--------------------------------------------------------------------------------
+-- Test: Inlay hint handler uses facade buffer
+--------------------------------------------------------------------------------
+h.run_test('inlay_hint_facade_handler', function()
+  h.open_notebook('lsp_test.ipynb')
+  h.assert_true(wait_for_lsp(), 'LSP should attach')
+
+  local state = h.get_state()
+  if not lsp_supports_method(state, 'textDocument/inlayHint') then
+    print('  SKIP: inlayHint not supported by LSP')
+    return
+  end
+
+  local orig_handler = vim.lsp.handlers['textDocument/inlayHint']
+  if not orig_handler then
+    print('  SKIP: inlayHint handler not available')
+    return
+  end
+
+  local seen_bufnr = nil
+  vim.lsp.handlers['textDocument/inlayHint'] = function(err, result, ctx, config)
+    if ctx and ctx.bufnr then
+      seen_bufnr = ctx.bufnr
+    end
+    return orig_handler(err, result, ctx, config)
+  end
+
+  -- Request inlay hints for full buffer range
+  local line_count = vim.api.nvim_buf_line_count(state.facade_buf)
+  local params = {
+    textDocument = { uri = vim.uri_from_fname(state.facade_path) },
+    range = {
+      start = { line = 0, character = 0 },
+      ['end'] = { line = math.max(line_count - 1, 0), character = 0 },
+    },
+  }
+
+  vim.lsp.buf_request(state.facade_buf, 'textDocument/inlayHint', params, nil)
+  vim.wait(5000, function() return seen_bufnr ~= nil end, 100)
+
+  -- Restore handler
+  vim.lsp.handlers['textDocument/inlayHint'] = orig_handler
+
+  h.assert_eq(seen_bufnr, state.facade_buf, 'Inlay hints should target facade buffer')
+end)
+
+--------------------------------------------------------------------------------
+-- Test: Selection range handler uses facade buffer
+--------------------------------------------------------------------------------
+h.run_test('selection_range_facade_handler', function()
+  h.open_notebook('lsp_test.ipynb')
+  h.assert_true(wait_for_lsp(), 'LSP should attach')
+
+  local state = h.get_state()
+  if not lsp_supports_method(state, 'textDocument/selectionRange') then
+    print('  SKIP: selectionRange not supported by LSP')
+    return
+  end
+
+  -- Position cursor on "hello"
+  local cells_mod = require('ipynb.cells')
+  local content_start, _ = cells_mod.get_content_range(state, 1)
+  vim.api.nvim_win_set_cursor(0, { content_start + 1, 4 })
+
+  local orig_handler = vim.lsp.handlers['textDocument/selectionRange']
+  if not orig_handler then
+    print('  SKIP: selectionRange handler not available')
+    return
+  end
+
+  local seen_bufnr = nil
+  local got_result = false
+  vim.lsp.handlers['textDocument/selectionRange'] = function(err, result, ctx, config)
+    if ctx and ctx.bufnr then
+      seen_bufnr = ctx.bufnr
+    end
+    got_result = true
+    return orig_handler(err, result, ctx, config)
+  end
+
+  local params = vim.lsp.util.make_position_params()
+  params.positions = { params.position }
+  params.position = nil
+  vim.lsp.buf_request(state.facade_buf, 'textDocument/selectionRange', params, nil)
+
+  vim.wait(5000, function() return got_result end, 100)
+
+  -- Restore handler
+  vim.lsp.handlers['textDocument/selectionRange'] = orig_handler
+
+  h.assert_true(got_result, 'Should get selectionRange response')
+  h.assert_eq(seen_bufnr, state.facade_buf, 'Selection range should target facade buffer')
 end)
 
 --------------------------------------------------------------------------------

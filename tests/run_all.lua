@@ -163,6 +163,28 @@ local function ensure_venv_lsp()
   end
 end
 
+local function ensure_gopls_lsp()
+  if vim.env.IPYNB_TEST_SKIP_GOPLS_BOOTSTRAP == '1' then
+    return
+  end
+
+  if exe('gopls') then
+    vim.env.IPYNB_TEST_GOPLS_BIN = 'gopls'
+    return
+  end
+
+  if exe('go') then
+    print('Bootstrapping gopls via go install...')
+    vim.system({ 'go', 'install', 'golang.org/x/tools/gopls@latest' }, { text = true }):wait()
+    if exe('gopls') then
+      vim.env.IPYNB_TEST_GOPLS_BIN = 'gopls'
+      return
+    end
+  else
+    print('WARN: go not found; skipping gopls bootstrap')
+  end
+end
+
 local function run_test_file(test_file)
   local name = vim.fn.fnamemodify(test_file, ':t:r')
   print('>>> Running ' .. name .. '...')
@@ -177,15 +199,25 @@ local function run_test_file(test_file)
   }
 
   local env = {
+    PATH = vim.env.PATH,
     XDG_DATA_HOME = vim.env.XDG_DATA_HOME,
     XDG_STATE_HOME = vim.env.XDG_STATE_HOME,
     XDG_CACHE_HOME = vim.env.XDG_CACHE_HOME,
     XDG_CONFIG_HOME = vim.env.XDG_CONFIG_HOME,
     NVIM_APPNAME = vim.env.NVIM_APPNAME,
-    IPYNB_TEST_LSP_BIN = vim.env.IPYNB_TEST_LSP_BIN,
-    IPYNB_TEST_LSP_ARGS = vim.env.IPYNB_TEST_LSP_ARGS,
     IPYNB_TEST_SKIP_PARSER_SO = vim.env.IPYNB_TEST_SKIP_PARSER_SO,
   }
+
+  -- Default LSP env (pyright/basedpyright)
+  env.IPYNB_TEST_LSP_BIN = vim.env.IPYNB_TEST_LSP_BIN
+  env.IPYNB_TEST_LSP_ARGS = vim.env.IPYNB_TEST_LSP_ARGS
+
+  -- Override for gopls test file
+  if test_file:match('test_lsp_go%.lua$') then
+    env.IPYNB_TEST_LSP_SERVER = 'gopls'
+    env.IPYNB_TEST_LSP_BIN = vim.env.IPYNB_TEST_GOPLS_BIN or env.IPYNB_TEST_LSP_BIN
+    env.IPYNB_TEST_LSP_ARGS = nil
+  end
 
   local stdout = vim.loop.new_pipe(false)
   local stderr = vim.loop.new_pipe(false)
@@ -300,6 +332,7 @@ if vim.env.IPYNB_TEST_SKIP_BOOTSTRAP ~= '1' then
 end
 
 ensure_venv_lsp()
+ensure_gopls_lsp()
 
 print('Running ipynb.nvim test suite')
 print('==============================')
@@ -313,6 +346,7 @@ local tests = {
   join(root, 'tests/test_undo.lua'),
   join(root, 'tests/test_io.lua'),
   join(root, 'tests/test_lsp.lua'),
+  join(root, 'tests/test_lsp_go.lua'),
   join(root, 'tests/test_treesitter_autoinstall.lua'),
 }
 

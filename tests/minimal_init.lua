@@ -78,32 +78,55 @@ if has_lspconfig then
   local cmd = nil
   local lsp_bin = vim.env.IPYNB_TEST_LSP_BIN
   local lsp_args = vim.env.IPYNB_TEST_LSP_ARGS
+  local lsp_server = vim.env.IPYNB_TEST_LSP_SERVER
 
-  if lsp_bin and lsp_bin ~= '' and vim.fn.executable(lsp_bin) == 1 then
-    cmd = { lsp_bin }
-    if lsp_args and lsp_args ~= '' then
-      for _, arg in ipairs(vim.split(lsp_args, ' ', { trimempty = true })) do
-        table.insert(cmd, arg)
+  if lsp_server and lsp_server ~= '' then
+    -- Explicit server selection (e.g., "gopls")
+    if lsp_bin and lsp_bin ~= '' and vim.fn.executable(lsp_bin) == 1 then
+      cmd = { lsp_bin }
+      -- gopls does not accept --stdio; ignore shared args
+      if lsp_server ~= 'gopls' and lsp_args and lsp_args ~= '' then
+        for _, arg in ipairs(vim.split(lsp_args, ' ', { trimempty = true })) do
+          table.insert(cmd, arg)
+        end
       end
     end
-    lspconfig.basedpyright.setup({ cmd = cmd })
-  else
-    if vim.fn.executable('basedpyright-langserver') == 1 then
-      lspconfig.basedpyright.setup({})
-    elseif vim.fn.executable('pyright-langserver') == 1 then
-      lspconfig.pyright.setup({})
-    end
-  end
 
-  -- Optional ruff LSP for formatting (ruff binary)
-  local venv_ruff = plugin_dir .. '/tests/.nvim-test/venv/bin/ruff'
-  if vim.fn.executable(venv_ruff) == 1 then
-    if lspconfig.ruff then
-      lspconfig.ruff.setup({ cmd = { venv_ruff, 'server' } })
+    if lsp_server == 'gopls' and lspconfig.gopls then
+      if cmd then
+        lspconfig.gopls.setup({ cmd = cmd })
+      elseif vim.fn.executable('gopls') == 1 then
+        lspconfig.gopls.setup({ cmd = { 'gopls' } })
+      end
     end
-  elseif vim.fn.executable('ruff') == 1 then
-    if lspconfig.ruff then
-      lspconfig.ruff.setup({ cmd = { 'ruff', 'server' } })
+  else
+    -- Default: basedpyright/pyright
+    if lsp_bin and lsp_bin ~= '' and vim.fn.executable(lsp_bin) == 1 then
+      cmd = { lsp_bin }
+      if lsp_args and lsp_args ~= '' then
+        for _, arg in ipairs(vim.split(lsp_args, ' ', { trimempty = true })) do
+          table.insert(cmd, arg)
+        end
+      end
+      lspconfig.basedpyright.setup({ cmd = cmd })
+    else
+      if vim.fn.executable('basedpyright-langserver') == 1 then
+        lspconfig.basedpyright.setup({})
+      elseif vim.fn.executable('pyright-langserver') == 1 then
+        lspconfig.pyright.setup({})
+      end
+    end
+
+    -- Optional ruff LSP for formatting (ruff binary)
+    local venv_ruff = plugin_dir .. '/tests/.nvim-test/venv/bin/ruff'
+    if vim.fn.executable(venv_ruff) == 1 then
+      if lspconfig.ruff then
+        lspconfig.ruff.setup({ cmd = { venv_ruff, 'server' } })
+      end
+    elseif vim.fn.executable('ruff') == 1 then
+      if lspconfig.ruff then
+        lspconfig.ruff.setup({ cmd = { 'ruff', 'server' } })
+      end
     end
   end
 end
