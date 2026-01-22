@@ -116,6 +116,47 @@ function M.create_shadow(state)
   -- Setup diagnostics forwarding
   require('ipynb.lsp.diagnostics').setup_diagnostics_proxy(state)
 
+  -- When LSP attaches to shadow, emit LspAttach for facade/edit buffers
+  -- so keymaps gated by LspAttach (e.g., LazyVim/which-key) are registered.
+  local group = vim.api.nvim_create_augroup('ipynb_lsp_attach_' .. shadow_buf, { clear = true })
+  vim.api.nvim_create_autocmd('LspAttach', {
+    buffer = shadow_buf,
+    group = group,
+    callback = function(args)
+      local client_id = args.data and args.data.client_id
+      if not client_id then
+        return
+      end
+
+      -- Avoid duplicate LspAttach emissions per buffer/client
+      state._lsp_attach_emitted = state._lsp_attach_emitted or {}
+      local function emit_for_buf(bufnr)
+        if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+          return
+        end
+        state._lsp_attach_emitted[bufnr] = state._lsp_attach_emitted[bufnr] or {}
+        if state._lsp_attach_emitted[bufnr][client_id] then
+          return
+        end
+        -- Mark as attached so Snacks.util.lsp.on can see it
+        local client = vim.lsp.get_client_by_id(client_id)
+        if client and client.attached_buffers then
+          client.attached_buffers[bufnr] = true
+        end
+        state._lsp_attach_emitted[bufnr][client_id] = true
+        vim.api.nvim_exec_autocmds('LspAttach', {
+          buffer = bufnr,
+          data = { client_id = client_id },
+        })
+      end
+
+      -- Emit LspAttach for facade buffer
+      emit_for_buf(state.facade_buf)
+
+      -- Edit buffers already fire LspAttach in edit.lua (see M.fire_lsp_attach).
+    end,
+  })
+
   return shadow_buf
 end
 
