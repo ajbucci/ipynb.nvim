@@ -1,0 +1,145 @@
+[
+  {
+    "type": "cell",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "code_cell",
+          "named": true
+        },
+        {
+          "type": "markdown_cell",
+          "named": true
+        },
+        {
+          "type": "raw_cell",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "cell_content",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "content_line",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "code_cell",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "cell_content",
+          "named": true
+        },
+        {
+          "type": "cell_end",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "markdown_cell",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "cell_content",
+          "named": true
+        },
+        {
+          "type": "cell_end",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "notebook",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "blank_line",
+          "named": true
+        },
+        {
+          "type": "cell",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "raw_cell",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "cell_content",
+          "named": true
+        },
+        {
+          "type": "cell_end",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "\n",
+    "named": false
+  },
+  {
+    "type": "# <<ipynb_nvim:code>>",
+    "named": false
+  },
+  {
+    "type": "# <<ipynb_nvim:markdown>>",
+    "named": false
+  },
+  {
+    "type": "# <<ipynb_nvim:raw>>",
+    "named": false
+  },
+  {
+    "type": "blank_line",
+    "named": true
+  },
+  {
+    "type": "cell_end",
+    "named": true
+  },
+  {
+    "type": "content_line",
+    "named": true
+  }
+]

@@ -18,8 +18,6 @@ wheels/
 tree-sitter-ipynb/tree-sitter
 tree-sitter-ipynb/node_modules/
 tree-sitter-ipynb/package-lock.json
-tree-sitter-ipynb/src/grammar.json
-tree-sitter-ipynb/src/node-types.json
 tree-sitter-ipynb/src/tree_sitter/alloc.h
 tree-sitter-ipynb/src/tree_sitter/array.h
 

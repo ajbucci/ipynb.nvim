@@ -1,0 +1,170 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/grammar.schema.json",
+  "name": "ipynb",
+  "rules": {
+    "notebook": {
+      "type": "REPEAT",
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "cell"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "blank_line"
+          }
+        ]
+      }
+    },
+    "blank_line": {
+      "type": "PATTERN",
+      "value": "\\n"
+    },
+    "cell": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "code_cell"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "markdown_cell"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "raw_cell"
+        }
+      ]
+    },
+    "code_cell": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "# <<ipynb_nvim:code>>"
+        },
+        {
+          "type": "STRING",
+          "value": "\n"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "ALIAS",
+              "content": {
+                "type": "REPEAT1",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "content_line"
+                }
+              },
+              "named": true,
+              "value": "cell_content"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "SYMBOL",
+          "name": "cell_end"
+        }
+      ]
+    },
+    "markdown_cell": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "# <<ipynb_nvim:markdown>>"
+        },
+        {
+          "type": "STRING",
+          "value": "\n"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "ALIAS",
+              "content": {
+                "type": "REPEAT1",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "content_line"
+                }
+              },
+              "named": true,
+              "value": "cell_content"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "SYMBOL",
+          "name": "cell_end"
+        }
+      ]
+    },
+    "raw_cell": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "# <<ipynb_nvim:raw>>"
+        },
+        {
+          "type": "STRING",
+          "value": "\n"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "ALIAS",
+              "content": {
+                "type": "REPEAT1",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "content_line"
+                }
+              },
+              "named": true,
+              "value": "cell_content"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "SYMBOL",
+          "name": "cell_end"
+        }
+      ]
+    }
+  },
+  "extras": [],
+  "conflicts": [],
+  "precedences": [],
+  "externals": [
+    {
+      "type": "SYMBOL",
+      "name": "content_line"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "cell_end"
+    }
+  ],
+  "inline": [],
+  "supertypes": [],
+  "reserved": {}
+}
