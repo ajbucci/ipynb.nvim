@@ -89,6 +89,14 @@ function M.rewrite_params(params, state, is_edit_buf, line_offset)
     if params.textDocument then
       params.textDocument.uri = vim.uri_from_fname(state.shadow_path)
     end
+    if params.item then
+      if params.item.uri then
+        params.item.uri = vim.uri_from_fname(state.shadow_path)
+      end
+      if params.item.targetUri then
+        params.item.targetUri = vim.uri_from_fname(state.shadow_path)
+      end
+    end
     if is_edit_buf then
       M.apply_line_offset(params, line_offset)
     end
@@ -101,6 +109,14 @@ function M.rewrite_params(params, state, is_edit_buf, line_offset)
         p = vim.deepcopy(p)
         if p.textDocument then
           p.textDocument.uri = vim.uri_from_fname(state.shadow_path)
+        end
+        if p.item then
+          if p.item.uri then
+            p.item.uri = vim.uri_from_fname(state.shadow_path)
+          end
+          if p.item.targetUri then
+            p.item.targetUri = vim.uri_from_fname(state.shadow_path)
+          end
         end
         if is_edit_buf then
           M.apply_line_offset(p, line_offset)
