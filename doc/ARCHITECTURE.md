@@ -9,10 +9,10 @@ A modal Jupyter notebook editor for Neovim with partial LSP support.
 1. **Facade buffer as source of truth** - Single buffer in custom notebook format (user-facing view)
 2. **Modal cell editing** - Floating window for editing, facade for navigation
 3. **Shadow buffer for LSP** - Hidden buffer with code cells only (markdown → blank lines), LSP attaches here
-4. **Line-synchronized** - Shadow and facade have identical line counts (1:1 position mapping)
+4. **Line-synchronized** - Shadow and facade match line-for-line for cell markers and content; the facade may include an extra trailing blank line for scrolling
 5. **Lazy edit buffers** - Cell content loaded into float on demand
 6. **Facade-aware navigation** - `nb://` URIs are used for picker previews and are immediately redirected back to the facade when opened in normal windows
-7. **LSP keymaps on facade** - `LspAttach` is emitted for the facade buffer so user keymaps appear on the notebook view
+7. **LSP keymaps on facade + edit buffers** - `LspAttach` is emitted for the facade and edit buffers so user keymaps appear on both views (the LSP client stays attached to the shadow buffer)
 
 ---
 
@@ -54,6 +54,7 @@ A modal Jupyter notebook editor for Neovim with partial LSP support.
 │  • Markdown cells show content    │    │  • Markdown cells = blank lines   │
 │  • Visual decorations/borders     │    │  • LSP attached here (any lang)   │
 │  • Treesitter language injection  │    │  • Same line count as facade      │
+│                                   │    │    (minus trailing blank)        │
 └───────────────────────────────────┘    └───────────────────────────────────┘
           │                                          │
           │         ┌────────────────────────────────┘
@@ -62,6 +63,7 @@ A modal Jupyter notebook editor for Neovim with partial LSP support.
     ┌───────────────────────┐
     │    LSP Proxy Layer    │
     │  • Requests: facade → shadow buffer (position unchanged)
+    │  • Requests: edit buffer → shadow buffer (line-offset to match facade)
     │  • Responses: shadow → facade buffer (position unchanged)
     │  • Diagnostics: filter markdown cells from display
     └───────────────────────┘
@@ -74,29 +76,29 @@ A modal Jupyter notebook editor for Neovim with partial LSP support.
     └─────────────┘                    └───────────┘
 ```
 
-**Key insight:** Shadow buffer maintains 1:1 line mapping with facade. Line N in facade = Line N in shadow.
-This eliminates position translation complexity - LSP positions work directly.
+**Key insight:** Shadow buffer maintains 1:1 line mapping with the facade for cell markers and content. Line N in facade = Line N in shadow (excluding the optional trailing blank line at EOF).
+This eliminates position translation for facade requests. Edit buffers are cell-relative and use a line offset when proxying to the shadow buffer.
 
 ### Notes on LSP UX
 
 - **nb:// URI scheme**: LSP results are rewritten to `nb://` for picker previews so users see the facade view instead of raw JSON. If a picker tries to open an `nb://` buffer in a normal window, it is redirected to the actual facade buffer.
-- **Facade LspAttach**: The facade buffer fires `LspAttach` so user LSP keymaps (gd/gr/K/etc.) are available on the notebook view even though the LSP client is attached to the shadow buffer.
+- **Facade/Edit LspAttach**: The facade and edit buffers fire `LspAttach` so user LSP keymaps (gd/gr/K/etc.) are available on the notebook view and inside the edit float even though the LSP client is attached to the shadow buffer. Edit buffers are also marked in `client.attached_buffers` and change-tracking is suppressed to avoid `_changetracking` errors.
 - **Shadow location**: Shadow buffers can live in temp or under the workspace (opt-in) to satisfy servers that require project layout. See `config.lua` for `shadow.location` and `shadow.dir`.
 
 ---
 
-## Feasibility Summary (Verified with Neovim API)
+## Architecture Summary
 
-| Component | Feasibility | Key API | Notes |
-|-----------|-------------|---------|-------|
-| Facade buffer | ✅ Verified | Original .ipynb path + `modifiable=false` | Keeps real path for plugin compatibility |
-| Edit float with LSP context | ✅ Verified | `nvim_buf_attach` sync pattern | Sync edits to facade in real-time |
-| Extmark cell tracking | ✅ Verified | `nvim_buf_set_extmark` with `right_gravity=false` | Handles 100+ cells efficiently |
-| Cell visual borders | ✅ Verified | `virt_lines` extmarks | Full-width separator lines |
-| Cell backgrounds | ✅ Verified | `line_hl_group` with `end_row` | Multi-line highlight ranges |
-| Active cell highlight | ✅ Verified | Reuse extmark ID on `CursorMoved` | Single extmark that moves |
-| Seamless float positioning | ✅ Verified | `relative='win'` + `bufpos` | Anchors to buffer position |
-| Markdown highlighting | ✅ Verified | Custom tree-sitter grammar | Language injection for code/markdown cells |
+| Component | Key API | Notes |
+|-----------|---------|-------|
+| Facade buffer | Original .ipynb path + `modifiable=false` | Keeps real path for plugin compatibility |
+| Edit float with LSP context | `nvim_create_autocmd` (TextChangedI/TextChanged/InsertLeave) | Sync edits to facade and shadow |
+| Extmark cell tracking | `nvim_buf_set_extmark` with `right_gravity=false` | Handles 100+ cells efficiently |
+| Cell visual borders | `virt_text` + `conceal` + sign column | Rounded borders + left gutter |
+| Cell backgrounds | Border-only (no background extmarks) | Emphasis via border + hints |
+| Active cell highlight | Re-render visible cells on `CursorMoved` | Border highlight reflects hover/edit |
+| Seamless float positioning | `relative='win'` + `bufpos` | Anchors to buffer position |
+| Markdown highlighting | Custom tree-sitter grammar | Language injection for code/markdown cells |
 
 ---
 
@@ -119,10 +121,12 @@ lua/ipynb/
 │   ├── request.lua    # Core request proxying, interceptor registry
 │   ├── navigation.lua # Window/cursor redirection for edit float
 │   ├── format.lua     # Cell formatting, vim.lsp.buf.format wrapper
+│   ├── rename.lua     # Rename interceptor, workspace edit application
 │   ├── diagnostics.lua# Diagnostics forwarding to facade
 │   └── completion.lua # Completion and edit buffer diagnostics
 ├── visuals.lua        # Cell decorations, borders, highlights
-├── markdown.lua       # Minimal stub (treesitter handles highlighting)
+├── util.lua           # Shared helpers
+├── words.lua          # Word lists for human-readable cell IDs (JEP 62 Option D)
 ├── keymaps.lua        # Keymap definitions
 ├── kernel.lua         # Jupyter kernel connection (per-notebook state)
 ├── output.lua         # Cell output rendering
@@ -146,15 +150,21 @@ tree-sitter-ipynb/
 └── parser.so          # Local dev build (not shipped - auto-compiled via nvim-treesitter)
 
 tests/
-├── run_all.sh         # Test runner script (./tests/run_all.sh)
-├── minimal_init.lua   # Minimal Neovim config for headless tests
-├── helpers.lua        # Test helper functions
-├── fixtures/          # Test notebook files (.ipynb)
-├── test_cells.lua     # Cell boundary tracking tests
-├── test_modified.lua  # Buffer modification detection tests
-├── test_undo.lua      # Undo/redo functionality tests
-├── test_lsp.lua       # LSP proxy and shadow buffer tests
+├── run_all.sh             # Test runner script (./tests/run_all.sh)
+├── run_all.lua            # Lua test runner entry
+├── bootstrap_init.lua     # Bootstraps minimal test runtime
+├── minimal_init.lua       # Minimal Neovim config for headless tests
+├── helpers.lua            # Test helper functions
+├── fixtures/              # Test notebook files (.ipynb)
+├── test_cells.lua         # Cell boundary tracking tests
+├── test_io.lua            # File I/O and jupytext conversion tests
+├── test_modified.lua      # Buffer modification detection tests
+├── test_undo.lua          # Undo/redo functionality tests
+├── test_lsp.lua           # LSP proxy and shadow buffer tests
+├── test_lsp_go.lua        # LSP navigation tests
 ├── test_treesitter.lua    # Treesitter parser tests
+├── test_treesitter_autoinstall.lua # Treesitter auto-install tests
+├── test_source_splitting.py # Source splitting tests (Python)
 └── test_kernel_bridge.py  # Kernel bridge tests (Python)
 ```
 
@@ -165,8 +175,8 @@ tests/
 Each cell has a unique `id` field generated at creation time:
 
 ```lua
--- Format: cell_<timestamp>_<counter>
-cell.id = string.format('cell_%d_%d', vim.loop.now(), counter)
+-- Format: adjective-animal (JEP 62 Option D), e.g., "bold-fox"
+cell.id = words.adjectives[... ] .. '-' .. words.animals[...]
 ```
 
 **Why unique IDs matter:**
@@ -191,20 +201,23 @@ cell.id = string.format('cell_%d_%d', vim.loop.now(), counter)
 
 **Notebook Format** (jupytext-inspired with explicit end markers):
 
-```python
+```
 # <<ipynb_nvim:markdown>>
 # Notebook Title
 Some description with **bold** text
 # <</ipynb_nvim>>
+
 # <<ipynb_nvim:code>>
 import numpy as np
 
 def process(data):
     return data * 2
 # <</ipynb_nvim>>
+
 # <<ipynb_nvim:markdown>>
 ## Results Section
 # <</ipynb_nvim>>
+
 # <<ipynb_nvim:code>>
 result = process(np.array([1, 2, 3]))
 print(result)
@@ -216,6 +229,7 @@ print(result)
 - Cell start: `# <<ipynb_nvim:code>>` (code) or `# <<ipynb_nvim:markdown>>` / `# <<ipynb_nvim:raw>>`
 - Cell end: `# <</ipynb_nvim>>` (custom marker)
 - Markdown/raw cells: Content stored as-is (no `#` prefix on each line)
+- Facade includes a blank separator line between cells and a trailing blank line at EOF
 - Note: Traditional jupytext uses `#` prefix on markdown lines to keep the file valid Python.
   A future enhancement could add an optional flag to enable prefix commenting for compatibility.
 
@@ -257,7 +271,7 @@ function M.create(state, buf)
   -- Configure buffer
   vim.bo[buf].filetype = 'ipynb'  -- Custom filetype, LSP attaches to shadow buffer
   vim.bo[buf].modifiable = false
-  vim.bo[buf].readonly = true
+  -- readonly=false to avoid warnings on :w; modifiable=false is sufficient
 
   return buf
 end
@@ -265,15 +279,8 @@ end
 
 **Update (when cell content changes):**
 
-```lua
-function M.update_region(state, start_line, end_line, new_lines)
-  vim.schedule(function()
-    vim.bo[state.facade_buf].modifiable = true
-    vim.api.nvim_buf_set_lines(state.facade_buf, start_line, end_line, false, new_lines)
-    vim.bo[state.facade_buf].modifiable = false
-  end)
-end
-```
+Edits flow through the edit buffer; facade is kept modifiable during an edit session to avoid
+undo chain breaks, then restored to non-modifiable on close.
 
 ---
 
@@ -292,7 +299,8 @@ function M.place_markers(state)
       invalidate = true,       -- Mark invalid if cell deleted
       undo_restore = true,     -- Restore on undo
     })
-    line = line + M.count_cell_lines(cell) + 1  -- +1 for # <<ipynb_nvim:code>> header
+    -- start marker + content + end marker + blank separator (except last)
+    line = line + M.total_cell_lines(cell) + (i < #state.cells and 1 or 0)
   end
 end
 
@@ -320,18 +328,8 @@ function M.get_cell_range(state, cell_idx)
   )
   local start_line = pos[1]
 
-  -- Find next cell's start or end of buffer
-  local end_line
-  if cell_idx < #state.cells then
-    local next_cell = state.cells[cell_idx + 1]
-    local next_pos = vim.api.nvim_buf_get_extmark_by_id(
-      state.facade_buf, state.namespace, next_cell.extmark_id, {}
-    )
-    end_line = next_pos[1] - 1
-  else
-    end_line = vim.api.nvim_buf_line_count(state.facade_buf) - 1
-  end
-
+  -- End line is start + total_cell_lines - 1 (inclusive)
+  local end_line = start_line + M.total_cell_lines(cell) - 1
   return start_line, end_line
 end
 ```
@@ -364,11 +362,11 @@ function M.open(state, mode)
     win = parent_win,
     bufpos = { content_start, 0 },  -- Anchor to cell content start
     row = 0,
-    col = 0,
-    width = win_width,
+    col = float_col,   -- 0 for text-only, negative to cover line number gutter
+    width = float_width,
     height = #lines,
     border = 'none',  -- Seamless overlay
-    zindex = 50,
+    zindex = 40,
   })
 
   -- Store edit state
@@ -425,6 +423,9 @@ function M.setup_sync(state, buf)
       state.edit_state.insert_synced = false
     end,
   })
+
+  -- TextChanged: sync normal-mode edits (dd, p, etc.)
+  vim.api.nvim_create_autocmd('TextChanged', { ... })
 end
 ```
 
@@ -443,15 +444,12 @@ function M.close(state)
   -- Update cell content in state
   local edit = state.edit_state
   local lines = vim.api.nvim_buf_get_lines(edit.buf, 0, -1, false)
-  state.cells[edit.cell_idx].content = table.concat(lines, "\n")
+  state.cells[edit.cell_idx].source = table.concat(lines, "\n")
 
-  -- Close window (buffer auto-wiped)
+  -- Close window (edit buffer persists due to bufhidden='hide')
   if vim.api.nvim_win_is_valid(edit.win) then
     vim.api.nvim_win_close(edit.win, true)
   end
-
-  -- Detach LSP proxy
-  require('ipynb.lsp').detach(state)
 
   state.edit_state = nil
 end
@@ -501,17 +499,22 @@ Facade (user sees):              Shadow (LSP sees):
 2: # Title                       2: (blank)
 3: Description text              3: (blank)
 4: # <</ipynb_nvim>>                         4: (blank)
-5: # <<ipynb_nvim:code>>                          5: (blank)
-6: import pandas as pd           6: import pandas as pd
-7: df = pd.read_csv("x")         7: df = pd.read_csv("x")
-8: # <</ipynb_nvim>>                         8: (blank)
-9: # <<ipynb_nvim:markdown>>               9: (blank)
-10: More docs                    10: (blank)
-11: # <</ipynb_nvim>>                        11: (blank)
-12: # <<ipynb_nvim:code>>                         12: (blank)
-13: result = df.head()           13: result = df.head()
-14: # <</ipynb_nvim>>                        14: (blank)
+5: (blank)                       5: (blank)
+6: # <<ipynb_nvim:code>>                          6: (blank)
+7: import pandas as pd           7: import pandas as pd
+8: df = pd.read_csv("x")         8: df = pd.read_csv("x")
+9: # <</ipynb_nvim>>                         9: (blank)
+10: (blank)                      10: (blank)
+11: # <<ipynb_nvim:markdown>>               11: (blank)
+12: More docs                    12: (blank)
+13: # <</ipynb_nvim>>                        13: (blank)
+14: (blank)                      14: (blank)
+15: # <<ipynb_nvim:code>>                         15: (blank)
+16: result = df.head()           16: result = df.head()
+17: # <</ipynb_nvim>>                        17: (blank)
 ```
+
+Note: the facade buffer adds a trailing blank line at EOF for scrolling; the shadow buffer does not.
 
 **Benefits:**
 
@@ -525,14 +528,26 @@ Facade (user sees):              Shadow (LSP sees):
 
 ```lua
 function M.create_shadow(state)
-  -- Create hidden buffer with same line count as facade
-  local shadow_buf = vim.api.nvim_create_buf(false, true)  -- unlisted, scratch
+  -- Create hidden buffer with same line count as facade (excluding trailing blank)
+  -- NOTE: buftype must be normal for LSP to attach (not scratch)
+  local shadow_buf = vim.api.nvim_create_buf(false, false)  -- unlisted, normal
 
   -- Get language from notebook metadata (defaults to python)
   local lang, ext = get_language_info(state)  -- e.g., "julia", ".jl"
 
-  -- Create temp file for LSP (with appropriate extension)
-  local shadow_path = vim.fn.tempname() .. '_shadow' .. ext
+  -- Create shadow file for LSP (temp by default, or workspace if configured)
+  local shadow_path
+  local shadow_cfg = require('ipynb.config').get().shadow
+  if shadow_cfg and shadow_cfg.location == 'workspace' and state.facade_path then
+    local root = vim.fn.fnamemodify(state.facade_path, ':p:h')
+    local dir = vim.fs.joinpath(root, shadow_cfg.dir or '.ipynb.nvim')
+    vim.fn.mkdir(dir, 'p')
+    local filename = vim.fn.fnamemodify(state.facade_path, ':t')
+    local stem = filename:gsub('%.ipynb$', '')
+    shadow_path = vim.fs.joinpath(dir, stem .. '_shadow' .. ext)
+  else
+    shadow_path = vim.fn.tempname() .. '_shadow' .. ext
+  end
   vim.api.nvim_buf_set_name(shadow_buf, shadow_path)
 
   -- Generate shadow content (code cells preserved, markdown → blank)
@@ -552,21 +567,19 @@ end
 
 function M.generate_shadow_lines(state)
   local lines = {}
-  for _, cell in ipairs(state.cells) do
-    if cell.type == 'code' then
-      -- Code cell: include marker and content
-      table.insert(lines, '')  -- blank for # <<ipynb_nvim:code>> marker line
-      for line in (cell.source .. '\n'):gmatch('([^\n]*)\n') do
+  for i, cell in ipairs(state.cells) do
+    if i > 1 then
+      table.insert(lines, '') -- blank separator line between cells
+    end
+    table.insert(lines, '') -- start marker line
+    for line in (cell.source .. '\n'):gmatch('([^\n]*)\n') do
+      if cell.type == 'code' then
         table.insert(lines, line)
-      end
-    else
-      -- Markdown/raw cell: blank lines to preserve line count
-      table.insert(lines, '')  -- for # <<ipynb_nvim:markdown>> marker
-      local line_count = select(2, cell.source:gsub('\n', '\n')) + 1
-      for _ = 1, line_count do
+      else
         table.insert(lines, '')
       end
     end
+    table.insert(lines, '') -- end marker line
   end
   return lines
 end
@@ -593,42 +606,20 @@ function M.sync_shadow_region(state, start_line, end_line, new_lines, cell_type)
 end
 ```
 
-**LSP Request Proxying (facade → shadow):**
+**LSP Request Proxying (facade/edit → shadow):**
 
-```lua
-function M.setup_lsp_proxy(state)
-  -- Override LSP handlers for facade buffer to use shadow buffer
-  local facade_buf = state.facade_buf
+All LSP entry points are wrapped at the API level:
 
-  -- Intercept completion requests
-  vim.lsp.handlers['textDocument/completion'] = function(err, result, ctx, config)
-    -- Check if request was for facade, redirect to shadow
-    if ctx.bufnr == facade_buf then
-      ctx.bufnr = state.shadow_buf
-    end
-    return vim.lsp.handlers['textDocument/completion'](err, result, ctx, config)
-  end
-end
+- `vim.lsp.buf_request`, `buf_request_all`, `get_clients`
+- `vim.lsp.util.make_position_params`, `make_text_document_params`
+- `vim.lsp.buf_detach_client` (suppresses detach warnings for facade/edit buffers)
+- client `request()` and `supports_method()`
 
--- For gd, gr, K on facade buffer, make request to shadow buffer
-function M.goto_definition(state)
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local line, col = cursor[1] - 1, cursor[2]
+These wrappers rewrite params to the shadow buffer and rewrite result URIs back to facade
+(`file://` for navigation methods, `nb://` for picker previews).
 
-  -- Request goes to shadow buffer (same line/col)
-  local params = {
-    textDocument = { uri = vim.uri_from_fname(state.shadow_path) },
-    position = { line = line, character = col },
-  }
-
-  vim.lsp.buf_request(state.shadow_buf, 'textDocument/definition', params, function(err, result)
-    if result then
-      -- Result positions map directly back to facade (1:1 lines)
-      vim.lsp.util.jump_to_location(result[1], 'utf-8')
-    end
-  end)
-end
-```
+Edit buffer requests are line-offset by `edit_state.start_line` so positions map to the
+correct lines in the shadow buffer. Facade requests stay 1:1.
 
 **Diagnostics Display (filter markdown lines):**
 
@@ -681,6 +672,7 @@ local NAVIGATION_METHODS = {
   ['textDocument/declaration'] = true,
   ['textDocument/implementation'] = true,
   ['textDocument/typeDefinition'] = true,
+  ['textDocument/documentSymbol'] = true,
 }
 
 local function rewrite_result_uris(result, state, method)
@@ -735,6 +727,12 @@ vim._with = function(context, func)
     end
   end
   return orig_with(context, func)
+end
+
+-- Wrap vim.lsp.util.show_document: translate shadow/edit URIs to facade,
+-- close edit float if needed, and re-open it at the target when appropriate
+vim.lsp.util.show_document = function(location, offset_encoding, opts)
+  -- ... custom redirect logic ...
 end
 ```
 
@@ -917,105 +915,42 @@ These would follow the same proxy pattern: intercept request, redirect to shadow
 ```lua
 function M.setup_highlights()
   local set_hl = vim.api.nvim_set_hl
+  local hl_config = require('ipynb.config').get().highlights
 
-  -- Cell backgrounds
-  set_hl(0, 'NotebookCodeCell', { bg = '#1c1c2e' })
-  set_hl(0, 'NotebookMarkdownCell', { bg = '#1e2e1e' })
-  set_hl(0, 'NotebookRawCell', { bg = '#2e2e1e' })
+  -- Borders
+  set_hl(0, 'IpynbBorder', { link = hl_config.border, default = true })
+  set_hl(0, 'IpynbBorderHover', { link = hl_config.border_hover, default = true })
+  set_hl(0, 'IpynbBorderActive', { link = hl_config.border_active, default = true })
 
-  -- Active cell (higher priority overlay)
-  set_hl(0, 'NotebookActiveCell', { bg = '#2a2a3e' })
-  set_hl(0, 'NotebookActiveBorder', { fg = '#61afef', bold = true })
+  -- Output and status
+  set_hl(0, 'IpynbExecCount', { link = hl_config.exec_count, default = true })
+  set_hl(0, 'IpynbOutput', { link = hl_config.output, default = true })
+  set_hl(0, 'IpynbOutputError', { link = hl_config.output_error, default = true })
+  set_hl(0, 'IpynbExecuting', { link = hl_config.executing, default = true })
+  set_hl(0, 'IpynbQueued', { link = hl_config.queued, default = true })
 
-  -- Cell borders
-  set_hl(0, 'NotebookCellBorder', { fg = '#3e4452' })
-
-  -- Sign column indicators
-  set_hl(0, 'NotebookCodeSign', { fg = '#61afef' })
-  set_hl(0, 'NotebookMarkdownSign', { fg = '#98c379' })
-  set_hl(0, 'NotebookRawSign', { fg = '#e5c07b' })
-
-  -- Output
-  set_hl(0, 'NotebookOutput', { fg = '#abb2bf', italic = true })
-  set_hl(0, 'NotebookOutputError', { fg = '#e06c75' })
+  -- Action hints
+  set_hl(0, 'IpynbHint', { link = hl_config.hint, default = true })
 end
 ```
 
-**Cell decoration (backgrounds, borders, signs):**
+**Cell decoration (rounded borders + signs):**
 
 ```lua
-local cell_config = {
-  code = { bg = 'NotebookCodeCell', sign = '󰌠', sign_hl = 'NotebookCodeSign' },
-  markdown = { bg = 'NotebookMarkdownCell', sign = '󰍔', sign_hl = 'NotebookMarkdownSign' },
-  raw = { bg = 'NotebookRawCell', sign = '󰈙', sign_hl = 'NotebookRawSign' },
-}
-
 function M.render_cell(state, cell_idx)
   local cell = state.cells[cell_idx]
   local start_line, end_line = require('ipynb.cells').get_cell_range(state, cell_idx)
-  local cfg = cell_config[cell.type]
-  local ns = state.namespace
 
-  -- Background for entire cell
-  cell.bg_extmark = vim.api.nvim_buf_set_extmark(state.facade_buf, ns, start_line, 0, {
-    id = cell.bg_extmark,  -- Reuse ID if updating
-    end_row = end_line,
-    line_hl_group = cfg.bg,
-    hl_eol = true,
-    priority = 10,
-  })
-
-  -- Sign on first line
-  cell.sign_extmark = vim.api.nvim_buf_set_extmark(state.facade_buf, ns, start_line, 0, {
-    id = cell.sign_extmark,
-    sign_text = cfg.sign,
-    sign_hl_group = cfg.sign_hl,
-  })
-
-  -- Border below cell (except last cell)
-  if cell_idx < #state.cells then
-    cell.border_extmark = vim.api.nvim_buf_set_extmark(state.facade_buf, ns, end_line, 0, {
-      id = cell.border_extmark,
-      virt_lines = {{
-        { string.rep('─', 80), 'NotebookCellBorder' }
-      }},
-    })
-  end
+  -- Top/bottom borders replace marker lines using conceal + virt_text.
+  -- Left border is rendered via sign column for each content line.
 end
 ```
 
 **Active cell highlight (moves with cursor):**
 
-```lua
-local active_extmark_id = nil
-
-function M.update_active_cell(state)
-  local cursor_line = vim.api.nvim_win_get_cursor(0)[1] - 1  -- 0-indexed
-  local cell_idx = require('ipynb.cells').get_cell_at_line(state, cursor_line)
-
-  if not cell_idx then return end
-
-  local start_line, end_line = require('ipynb.cells').get_cell_range(state, cell_idx)
-
-  -- Update single extmark (reuse ID to avoid accumulation)
-  active_extmark_id = vim.api.nvim_buf_set_extmark(state.facade_buf, state.namespace, start_line, 0, {
-    id = active_extmark_id,
-    end_row = end_line,
-    line_hl_group = 'NotebookActiveCell',
-    hl_eol = true,
-    priority = 20,  -- Higher than base cell background
-  })
-end
-
-function M.setup_active_tracking(state)
-  vim.api.nvim_create_autocmd({'CursorMoved', 'CursorMovedI'}, {
-    buffer = state.facade_buf,
-    callback = function()
-      M.update_active_cell(state)
-    end
-  })
-end
-```
+Active/hover state is expressed via border highlight groups
+(`IpynbBorder`, `IpynbBorderHover`, `IpynbBorderActive`) and is refreshed on cursor
+movement (throttled) by re-rendering visible cells.
 
 ---
 
@@ -1194,8 +1129,13 @@ function M.setup_facade_keymaps(state)
   vim.keymap.set('n', km.prev_cell, function() require('ipynb.cells').goto_prev_cell(state) end, opts)
 
   -- Enter edit mode (hardcoded keys)
+  vim.keymap.set('n', '<CR>', function() require('ipynb.edit').open(state) end, opts)
   vim.keymap.set('n', 'i', function() require('ipynb.edit').open(state, 'i') end, opts)
+  vim.keymap.set('n', 'I', function() require('ipynb.edit').open(state, 'I') end, opts)
   vim.keymap.set('n', 'a', function() require('ipynb.edit').open(state, 'a') end, opts)
+  vim.keymap.set('n', 'A', function() require('ipynb.edit').open(state, 'A') end, opts)
+  vim.keymap.set('n', 'o', function() require('ipynb.edit').open(state, 'o') end, opts)
+  vim.keymap.set('n', 'O', function() require('ipynb.edit').open(state, 'O') end, opts)
 
   -- Cell operations
   vim.keymap.set('n', km.execute_cell, execute_cell_cb, opts)
@@ -1240,6 +1180,10 @@ function M.setup_edit_keymaps(state)
   vim.keymap.set('n', '<C-j>', function() M.edit_next_cell(state) end, opts)
   vim.keymap.set('n', '<C-k>', function() M.edit_prev_cell(state) end, opts)
 
+  -- Global undo/redo (facade history)
+  vim.keymap.set('n', 'u', function() require('ipynb.edit').global_undo(state) end, opts)
+  vim.keymap.set('n', '<C-r>', function() require('ipynb.edit').global_redo(state) end, opts)
+
   -- Formatting: vim.lsp.buf.format() is wrapped to work with notebooks (see lsp/format.lua)
 end
 ```
@@ -1270,7 +1214,7 @@ function M.render_outputs(state, cell_idx)
   local virt_lines = {}
 
   -- Output separator
-  table.insert(virt_lines, {{ '┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄', 'NotebookCellBorder' }})
+  table.insert(virt_lines, {{ '┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄', 'IpynbBorder' }})
 
   for _, output in ipairs(cell.outputs) do
     local rendered = M.render_output(output)
@@ -1290,22 +1234,22 @@ function M.render_output(output)
 
   if output.output_type == 'stream' then
     for line in output.text:gmatch('[^\n]+') do
-      table.insert(lines, {{ line, 'NotebookOutput' }})
+      table.insert(lines, {{ line, 'IpynbOutput' }})
     end
 
   elseif output.output_type == 'execute_result' then
     local text = output.data['text/plain'] or vim.inspect(output.data)
-    table.insert(lines, {{ 'Out: ' .. text, 'NotebookOutput' }})
+    table.insert(lines, {{ 'Out: ' .. text, 'IpynbOutput' }})
 
   elseif output.output_type == 'error' then
-    table.insert(lines, {{ output.ename .. ': ' .. output.evalue, 'NotebookOutputError' }})
+    table.insert(lines, {{ output.ename .. ': ' .. output.evalue, 'IpynbOutputError' }})
 
   elseif output.output_type == 'display_data' then
     if output.data['image/png'] then
       -- Image rendered inline via images.lua if snacks.nvim available
       -- Falls back to placeholder text if not
     else
-      table.insert(lines, {{ output.data['text/plain'] or '[Display]', 'NotebookOutput' }})
+      table.insert(lines, {{ output.data['text/plain'] or '[Display]', 'IpynbOutput' }})
     end
   end
 
@@ -1315,7 +1259,8 @@ end
 
 **Output float for copying:**
 
-Since virtual lines cannot be yanked directly, `go` keymap opens output in a floating buffer:
+Since virtual lines cannot be yanked directly, the `open_output` keymap
+(default: `<leader>ko`) opens output in a floating buffer:
 
 ```lua
 function M.open_output_float(state, cell_idx)
@@ -1352,7 +1297,7 @@ Images are rendered inline within cell outputs using the Kitty Graphics Protocol
 
 **Key design decisions:**
 
-1. **Unique cell IDs**: Each cell has a unique `id` field (e.g., `cell_1736418234567_1`). Images are stored in `state.images` keyed by `cell.id`, not by cell index. This ensures images stay associated with their cell even when cells are moved, inserted, or deleted.
+1. **Unique cell IDs**: Each cell has a unique `id` field (adjective-animal, e.g., `bold-fox`). Images are stored in `state.images` keyed by `cell.id`, not by cell index. This ensures images stay associated with their cell even when cells are moved, inserted, or deleted.
 
 2. **True interleaving via vendored placeholders**: Instead of using separate extmarks for text and images, we generate Kitty Graphics Protocol placeholder text ourselves and embed it directly in the `virt_lines` array alongside regular text. This guarantees correct ordering: text1 → img1 → text2 → img2 → etc.
 
@@ -1481,8 +1426,8 @@ Each notebook has its own independent kernel connection stored in `state.kernel`
 ---@field kernel_id string|nil Kernel ID from jupyter_client
 ---@field kernel_name string Kernel name (e.g., "python3", "julia-1.9")
 ---@field execution_state string Current state: "idle", "busy", "starting"
----@field pending_cells table<number, {cell_idx: number}> Cells waiting for execution
----@field callbacks table Async operation callbacks (complete, inspect, ping)
+---@field pending_cells table<string, {cell_idx: number}> Cells waiting for execution (keyed by msg_id)
+---@field callbacks table Async operation callbacks (complete, inspect, ping, is_alive)
 
 -- Kernel state is created per-notebook
 function M.start_bridge(state, python_path)
@@ -1502,8 +1447,8 @@ end
 │  │   ├─ job_id: Python bridge process handle                   ││
 │  │   ├─ connected: true/false                                  ││
 │  │   ├─ execution_state: "idle" | "busy"                       ││
-│  │   ├─ pending_cells: { [cell_idx]: {...} }                   ││
-│  │   └─ callbacks: { complete, inspect, ping }                 ││
+│  │   ├─ pending_cells: { [msg_id]: {...} }                     ││
+│  │   └─ callbacks: { complete, inspect, ping, is_alive }       ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
          │
@@ -1574,6 +1519,7 @@ def inspect(self, code: str, cursor_pos: int, detail_level: int = 0):
 4. Inspector displays results in a floating window with Tab navigation between sections
 
 **Parsers (extensible):**
+
 - Parsers live in `python/inspect_parsers/` and return a normalized `InspectSections` dataclass.
 - `get_parser(language, kernel_name)` routes to a parser; fallback is raw.
 - Raw output sets `_raw=true` and `_clean` (ANSI-stripped) to support non-Snacks setups.
@@ -1615,17 +1561,19 @@ end
 2. **Inspect cell** (`<leader>kv`): Batch-inspects all identifiers in the cell using treesitter
 
 3. **Auto-hover** (CursorHold): Automatically shows variable info when cursor rests on an identifier
-   - Configurable via `variable_hover.enabled` (default: true)
-   - Configurable delay via `variable_hover.delay` (default: 500ms)
+   - Configurable via `inspector.auto_hover.enabled` (default: false)
+   - Configurable delay via `inspector.auto_hover.delay` (default: 500ms)
    - Toggle with `<leader>kH`
 
 **Configuration:**
 
 ```lua
 require('ipynb').setup({
-  variable_hover = {
-    enabled = true,  -- Auto-show on CursorHold
-    delay = 500,     -- Milliseconds before showing
+  inspector = {
+    auto_hover = {
+      enabled = false,  -- Auto-show on CursorHold
+      delay = 500,      -- Milliseconds before showing
+    },
   },
 })
 ```
@@ -1666,8 +1614,7 @@ require('ipynb').setup({
 
 ### Phase 4: Visual Polish ✓
 
-- [x] Cell background highlighting
-- [x] Cell border separators (virt_lines)
+- [x] Cell border separators (virt_text overlay + sign column)
 - [x] Active cell tracking
 - [x] Sign column indicators
 - [x] Markdown concealment
@@ -1705,10 +1652,10 @@ require('ipynb').setup({
 
 **Implementation:**
 
-- Edit buffers have `undolevels=-1` (undo disabled in edit float)
-- All changes sync to facade buffer, which maintains the undo history
-- `u` and `<C-r>` in edit float trigger global undo/redo on facade
-- After undo/redo, all edit buffers are refreshed from facade content
+- Edit buffers keep their own undo while typing; facade receives synced edits on
+  insert-session boundaries and normal-mode edits.
+- `u` and `<C-r>` in edit float trigger global undo/redo on facade.
+- After undo/redo, edit buffers are refreshed from facade content.
 
 ### 3. Multi-language Support (Implemented)
 
@@ -1718,7 +1665,7 @@ Notebooks can contain code in different languages. The plugin now supports multi
 
 - **Syntax highlighting**: Uses custom tree-sitter directive to inject language from `vim.b[buf].ipynb_language`
 - **LSP support**: Shadow buffer uses language-specific file extension and filetype; triggers FileType autocmd so user's LSP config attaches automatically
-- **Dynamic switching**: `:NotebookSetKernel julia-1.9` updates highlighting and recreates shadow buffer
+- **Dynamic switching**: `:NotebookSetKernel julia-1.9` updates highlighting and updates the shadow buffer filetype (same shadow path)
 
 **LSP works with any language** - the shadow buffer gets the correct filetype (python, julia, r, etc.) and file extension (.py, .jl, .r, etc.), then triggers the FileType autocmd. Whatever LSP the user has configured for that filetype will attach automatically.
 
@@ -1726,15 +1673,7 @@ Notebooks can contain code in different languages. The plugin now supports multi
 
 ### 4. Keymaps
 
-Keymaps are still under discussion. Since the facade buffer is non-modifiable, we have full control over all keys without needing `<leader>` prefixes.
-
-**Goal:** Be intuitive for users coming from other notebook IDEs (Jupyter, VS Code, etc.)
-
-Common notebook keybindings to consider:
-
-- `<C-CR>` / `<S-CR>` for execute cell / execute and move
-- `dd` for delete cell (no leader needed)
-- `a` / `b` for insert cell above/below (Jupyter style)
+Keymaps are implemented and configurable via `config.keymaps`. The facade buffer is non-modifiable, so high-frequency actions use direct keys (no `<leader>` prefix), while the `<leader>k` menu covers the rest. Edit entry keys are hardcoded (`<CR>`, `i`, `I`, `a`, `A`, `o`, `O`) because the facade is non-modifiable.
 
 ---
 

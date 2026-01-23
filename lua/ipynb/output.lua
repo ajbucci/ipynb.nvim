@@ -1,6 +1,5 @@
 -- ipynb/output.lua - Cell output rendering
 -- Renders output as virtual lines (virt_lines extmarks)
--- Use :NotebookOutput or 'go' keymap to open output in copyable float
 
 local M = {}
 
