@@ -1562,26 +1562,21 @@ The variable inspector uses Jupyter's `inspect_request` protocol to query variab
 def inspect(self, code: str, cursor_pos: int, detail_level: int = 0):
     """Request variable/object inspection using Jupyter's inspect_request protocol."""
     msg_id = self.kernel_client.inspect(code, cursor_pos, detail_level)
-    # Wait for inspect_reply, parse ANSI-colored output into sections
-    # Returns: signature, docstring, type, string_form, file, source, etc.
+    # Wait for inspect_reply, route to per-kernel parser
+    # Returns a normalized InspectSections dict for the Lua UI
 ```
 
 **How it works:**
 
 1. Treesitter extracts identifier at cursor (handles attribute access like `plt.show`)
 2. `kernel.inspect()` sends `inspect_request` to the Jupyter kernel
-3. Python bridge parses IPython's ANSI-colored output into structured sections
+3. Python bridge selects a parser by kernel language/name and normalizes output
 4. Inspector displays results in a floating window with Tab navigation between sections
 
-**ANSI parsing:**
-IPython wraps section keys in red ANSI codes (`\x1b[31mKey:\x1b[39m`), making them easy to extract:
-
-```python
-# Find all keys wrapped in red ANSI codes
-key_pattern = re.compile(r'\x1b\[31m([\w\s]+):\x1b\[39m')
-matches = list(key_pattern.finditer(text))
-# Value for each key is text between current match end and next match start
-```
+**Parsers (extensible):**
+- Parsers live in `python/inspect_parsers/` and return a normalized `InspectSections` dataclass.
+- `get_parser(language, kernel_name)` routes to a parser; fallback is raw.
+- Raw output sets `_raw=true` and `_clean` (ANSI-stripped) to support non-Snacks setups.
 
 **Identifier detection:**
 
@@ -1612,10 +1607,10 @@ end
 **Key features:**
 
 1. **Inspect variable** (`<leader>kh`): Shows structured info with Tab navigation
-   - Signature (with syntax highlighting)
-   - Docstring (plain text)
-   - Type, file, source, etc.
-   - Sections displayed in Jupyter's order
+   - Value (if present)
+   - Signature (syntax highlighted)
+   - Docstring (uses `@string.documentation`)
+   - Metadata (Type/Namespace/Length/File)
 
 2. **Inspect cell** (`<leader>kv`): Batch-inspects all identifiers in the cell using treesitter
 
@@ -1642,7 +1637,7 @@ require('ipynb').setup({
 - Matches request/reply using `parent_header.msg_id` to avoid stale data
 - Edit float z-index lowered to 40 (from 50) so inspector floats appear on top
 - Section navigation: Tab/Shift-Tab or h/l to cycle through available sections
-- Syntax highlighting only for signature/source sections; plain text for docstrings
+- Syntax highlighting only for signature/source sections; docstrings use `@string.documentation`
 
 ---
 

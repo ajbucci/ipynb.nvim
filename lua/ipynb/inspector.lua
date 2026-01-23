@@ -8,6 +8,39 @@ local hover_win = nil
 local hover_timer = nil
 local auto_hover_enabled = nil -- nil = use config, true/false = override
 
+local function maybe_colorize_buf(buf, force)
+	if not force then
+		return
+	end
+	local ok, Snacks = pcall(require, "snacks")
+	if not ok or not Snacks.terminal or type(Snacks.terminal.colorize) ~= "function" then
+		return
+	end
+	local was_modifiable = vim.bo[buf].modifiable
+	vim.bo[buf].modifiable = true
+	pcall(vim.api.nvim_buf_call, buf, function()
+		Snacks.terminal.colorize()
+	end)
+	-- Snacks.terminal.colorize installs a TextChanged autocmd that forces cursor to last line
+	pcall(vim.api.nvim_clear_autocmds, { buffer = buf, event = "TextChanged" })
+	vim.bo[buf].modifiable = was_modifiable
+end
+
+local function apply_raw_or_clean(buf, sections)
+	if sections._raw ~= true then
+		return
+	end
+	local ok, Snacks = pcall(require, "snacks")
+	if not ok or not Snacks.terminal or type(Snacks.terminal.colorize) ~= "function" then
+		if sections._clean and type(sections._clean) == "string" then
+			local lines = vim.split(sections._clean, "\n", { plain = true })
+			vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+		end
+	else
+		maybe_colorize_buf(buf, true)
+	end
+end
+
 ---Get the identifier at cursor using treesitter on shadow buffer
 ---@param state NotebookState
 ---@return string|nil identifier, number|nil cell_idx
@@ -274,29 +307,79 @@ end
 ---@param lang string|nil Language for syntax highlighting (default: python)
 function M.show_inspect_float(name, sections, lang)
 	sections = sections or {}
+
+	-- Normalize vim.NIL (from JSON null) to nil to avoid userdata issues
+	for key, value in pairs(sections) do
+		if value == vim.NIL then
+			sections[key] = nil
+		end
+	end
 	local var_type = sections.type
 
-	-- Labels for display
-	local section_labels = {
-		string_form = "Value",
-		docstring = "Docstring",
-		signature = "Signature",
-		file = "File",
-		source = "Source",
-		init_docstring = "Init",
-		class_docstring = "Class",
-		length = "Length",
-	}
-
-	-- Use order from Jupyter (via _order key) or fall back to default
-	local section_order = sections._order or { "string_form", "docstring", "signature", "file", "source" }
-
-	-- Build list of available sections (in Jupyter's order)
-	-- Skip 'type' since it's shown in the header
 	local available = {}
-	for _, key in ipairs(section_order) do
-		if key ~= "_order" and key ~= "type" and sections[key] and sections[key] ~= "" then
-			table.insert(available, { key = key, label = section_labels[key] or key })
+
+	if lang == "python" then
+		local function add_section(key, label, content)
+			if content and content ~= "" then
+				sections[key] = content
+				table.insert(available, { key = key, label = label })
+			end
+		end
+
+		local has_value = sections.string_form and sections.string_form ~= ""
+		add_section("string_form", "Value", sections.string_form)
+
+		local signature = sections.definition or sections.init_definition or sections.call_def
+		add_section("signature", "Signature", signature)
+
+		local doc = sections.docstring
+			or sections.init_docstring
+			or sections.class_docstring
+			or sections.call_docstring
+
+		local meta_lines = {}
+		if sections.type_name then
+			table.insert(meta_lines, "Type: " .. tostring(sections.type_name))
+		end
+		if sections.namespace then
+			table.insert(meta_lines, "Namespace: " .. tostring(sections.namespace))
+		end
+		if sections.length then
+			table.insert(meta_lines, "Length: " .. tostring(sections.length))
+		end
+		if sections.file then
+			table.insert(meta_lines, "File: " .. tostring(sections.file))
+		end
+		local meta_content = #meta_lines > 0 and table.concat(meta_lines, "\n") or nil
+		if has_value then
+			add_section("metadata", "Metadata", meta_content)
+			add_section("docstring", "Docstring", doc)
+		else
+			add_section("docstring", "Docstring", doc)
+			add_section("metadata", "Metadata", meta_content)
+		end
+	else
+		-- Labels for display
+		local section_labels = {
+			string_form = "Value",
+			docstring = "Docstring",
+			signature = "Signature",
+			file = "File",
+			source = "Source",
+			init_docstring = "Init",
+			class_docstring = "Class",
+			length = "Length",
+		}
+
+		-- Use order from Jupyter (via _order key) or fall back to default
+		local section_order = sections._order or { "string_form", "docstring", "signature", "file", "source" }
+
+		-- Build list of available sections (in Jupyter's order)
+		-- Skip 'type' since it's shown in the header
+		for _, key in ipairs(section_order) do
+			if key ~= "_order" and key ~= "type" and sections[key] and sections[key] ~= "" then
+				table.insert(available, { key = key, label = section_labels[key] or key })
+			end
 		end
 	end
 
@@ -308,6 +391,7 @@ function M.show_inspect_float(name, sections, lang)
 	local current_idx = 1
 	local buf = nil
 	local win = nil
+	local fixed_width = nil
 
 	-- Forward declarations
 	local update_content, next_section, prev_section, close
@@ -315,6 +399,9 @@ function M.show_inspect_float(name, sections, lang)
 	update_content = function()
 		local section = available[current_idx]
 		local content = sections[section.key] or ""
+		if type(content) ~= "string" then
+			content = tostring(content)
+		end
 		local lines = vim.split(content, "\n", { plain = true })
 
 		-- Create a fresh buffer each time to avoid syntax state issues
@@ -324,18 +411,24 @@ function M.show_inspect_float(name, sections, lang)
 		vim.bo[buf].bufhidden = "wipe"
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 		vim.bo[buf].modifiable = false
+		apply_raw_or_clean(buf, sections)
 
 		-- Only use syntax highlighting for signature/source sections
 		if section.key == "signature" or section.key == "source" then
 			local ft = lang or "python"
 			vim.bo[buf].filetype = ft
 			pcall(vim.treesitter.start, buf, ft)
-		end
-
-		-- Calculate dimensions
-		local max_width = 0
-		for _, line in ipairs(lines) do
-			max_width = math.max(max_width, vim.fn.strdisplaywidth(line))
+		elseif section.key == "docstring" then
+			for i = 0, #lines - 1 do
+				pcall(vim.api.nvim_buf_add_highlight, buf, -1, "@string.documentation", i, 0, -1)
+			end
+		elseif section.key == "metadata" then
+			for i, line in ipairs(lines) do
+				local colon = line:find(":")
+				if colon then
+					pcall(vim.api.nvim_buf_add_highlight, buf, -1, "Title", i - 1, 0, colon)
+				end
+			end
 		end
 
 		-- Build title with type and section indicator
@@ -350,7 +443,34 @@ function M.show_inspect_float(name, sections, lang)
 				and string.format(" [%d/%d] %s | Tab: next ", current_idx, #available, section.label)
 			or string.format(" %s ", section.label)
 
-		local width = math.min(math.max(max_width + 2, #title + 2, #footer + 2, 20), 80)
+		if not fixed_width then
+			local max_line_width = 0
+			for _, item in ipairs(available) do
+				local sec_content = sections[item.key] or ""
+				if type(sec_content) ~= "string" then
+					sec_content = tostring(sec_content)
+				end
+				local sec_lines = vim.split(sec_content, "\n", { plain = true })
+				for _, line in ipairs(sec_lines) do
+					max_line_width = math.max(max_line_width, vim.fn.strdisplaywidth(line))
+				end
+			end
+			local footer_candidates = {}
+			if #available > 1 then
+				for i, item in ipairs(available) do
+					table.insert(footer_candidates, string.format(" [%d/%d] %s | Tab: next ", i, #available, item.label))
+				end
+			else
+				table.insert(footer_candidates, string.format(" %s ", available[1].label))
+			end
+			local max_footer = 0
+			for _, f in ipairs(footer_candidates) do
+				max_footer = math.max(max_footer, #f)
+			end
+			fixed_width = math.min(math.max(max_line_width + 2, #title + 2, max_footer + 2, 20), 80)
+		end
+
+		local width = fixed_width
 		local height = math.min(#lines, 20)
 
 		if win and vim.api.nvim_win_is_valid(win) then
@@ -585,6 +705,7 @@ function M.show_hover_silent(state)
 			vim.bo[buf].buftype = "nofile"
 			vim.bo[buf].bufhidden = "wipe"
 			vim.bo[buf].modifiable = false
+			apply_raw_or_clean(buf, sections)
 
 			local max_width = 0
 			for _, line in ipairs(lines) do

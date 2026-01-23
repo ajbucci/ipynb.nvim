@@ -10,74 +10,10 @@ import json
 import sys
 import threading
 import queue
-import re
 from typing import Optional, Dict, Any
 
-# Pattern to match ANSI escape codes (colors, etc.)
-ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;]*m')
+from inspect_parsers import get_parser
 
-def strip_ansi(text: str) -> str:
-    """Strip ANSI escape codes from text."""
-    if text is None:
-        return text
-    return ANSI_ESCAPE_PATTERN.sub('', text)
-
-def parse_inspect_output(text: str) -> dict:
-    """
-    Parse IPython inspect output into structured sections.
-    Keys are wrapped in red ANSI codes (\x1b[31m...\x1b[39m), making them easy to find.
-    Returns dict with keys: type, string_form, length, file, docstring, etc.
-    """
-    if not text:
-        return {}
-
-    # Map of IPython keys to our normalized keys
-    key_map = {
-        'Type': 'type',
-        'String form': 'string_form',
-        'Length': 'length',
-        'File': 'file',
-        'Docstring': 'docstring',
-        'Init docstring': 'init_docstring',
-        'Class docstring': 'class_docstring',
-        'Call docstring': 'call_docstring',
-        'Source': 'source',
-        'Signature': 'signature',
-        'Init signature': 'init_signature',
-        'Call signature': 'call_signature',
-    }
-
-    # Find all keys wrapped in red ANSI codes: \x1b[31mKey:\x1b[39m
-    # Pattern matches the red start, key name, colon, and red end
-    key_pattern = re.compile(r'\x1b\[31m([\w\s]+):\x1b\[39m')
-
-    matches = list(key_pattern.finditer(text))
-    if not matches:
-        # No ANSI-wrapped keys found, return raw text as string_form
-        return {'string_form': strip_ansi(text).strip()} if text.strip() else {}
-
-    result = {}
-    order = []  # Preserve section order from Jupyter output
-    for i, match in enumerate(matches):
-        key = match.group(1)
-        normalized_key = key_map.get(key, key.lower().replace(' ', '_'))
-
-        # Value is everything from end of this match to start of next match (or end of string)
-        value_start = match.end()
-        value_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        value = text[value_start:value_end]
-
-        # Strip ANSI codes from value and clean up whitespace
-        value = strip_ansi(value).strip()
-        if value:
-            result[normalized_key] = value
-            order.append(normalized_key)
-
-    # Include order so Lua can display sections in Jupyter's order
-    if order:
-        result['_order'] = order
-
-    return result
 
 try:
     import jupyter_client
@@ -96,6 +32,7 @@ class KernelBridge:
         self.kernel_manager: Optional[jupyter_client.KernelManager] = None
         self.kernel_client: Optional[jupyter_client.KernelClient] = None
         self.kernel_name: str = "python3"
+        self.kernel_language: Optional[str] = None
         self.execution_count: int = 0
         self.pending_executions: Dict[str, Dict[str, Any]] = {}
         self.iopub_thread: Optional[threading.Thread] = None
@@ -127,6 +64,7 @@ class KernelBridge:
                 language = self.kernel_manager.kernel_spec.language
             except Exception:
                 pass
+            self.kernel_language = language
 
             self.send_message({
                 "type": "kernel_started",
@@ -152,6 +90,13 @@ class KernelBridge:
             self.kernel_client.wait_for_ready(timeout=30)
 
             self._start_iopub_listener()
+
+            language = None
+            try:
+                language = self.kernel_manager.kernel_spec.language
+            except Exception:
+                pass
+            self.kernel_language = language
 
             self.send_message({
                 "type": "kernel_connected",
@@ -445,9 +390,9 @@ class KernelBridge:
                     content = reply.get("content", {})
                     data = content.get("data", {})
                     sections = {}
-                    # Parse text/plain into structured sections
-                    if "text/plain" in data:
-                        sections = parse_inspect_output(data["text/plain"])
+                    # Return raw text/plain for now; no custom parsing
+                    parser = get_parser(self.kernel_language, self.kernel_name)
+                    sections = parser(data)
                     self.send_message({
                         "type": "inspect_reply",
                         "request_id": request_id,
