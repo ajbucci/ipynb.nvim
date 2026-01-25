@@ -23,9 +23,16 @@ end
 
 ---Custom foldtext showing line count
 ---@return string
+local devicons_ok = pcall(require, 'nvim-web-devicons')
 function M.foldtext()
   local line_count = vim.v.foldend - vim.v.foldstart + 1
-  return string.format('--- %d lines ---', line_count)
+  local first_line = vim.fn.getline(vim.v.foldstart)
+  first_line = vim.trim(first_line)
+  if #first_line > 60 then
+    first_line = first_line:sub(1, 60) .. '...'
+  end
+  local icon = devicons_ok and '' or '⬍'
+  return string.format('%s  (%s %d lines)', first_line, icon, line_count)
 end
 
 ---Custom foldexpr using treesitter to find cell_content nodes
