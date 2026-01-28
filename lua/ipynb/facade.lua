@@ -120,7 +120,10 @@ function M.refresh(state)
 
   vim.bo[buf].modifiable = true
   set_facade_lines(buf, 0, -1, lines)
-  vim.bo[buf].modifiable = false
+  -- Only lock facade if not in edit buffer
+  if not state.edit_state then
+    vim.bo[buf].modifiable = false
+  end
 
   -- Refresh shadow buffer for LSP
   local lsp_mod = require('ipynb.lsp')
