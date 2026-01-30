@@ -472,7 +472,7 @@ function M.setup_sync(state, buf)
     end,
   })
 
-  -- Also sync facade on TextChanged (normal mode changes like dd, p, etc.)
+  -- Also sync facade on TextChanged (normal mode changes like dd, p, undo, redo, etc.)
   vim.api.nvim_create_autocmd('TextChanged', {
     group = group,
     buffer = buf,
@@ -568,15 +568,6 @@ function M.setup_edit_keymaps(state)
   vim.keymap.set('n', '<C-k>', function()
     M.edit_prev_cell(state)
   end, vim.tbl_extend('force', opts, { desc = 'Edit previous cell' }))
-
-  -- Global undo/redo (operates on facade buffer)
-  vim.keymap.set('n', 'u', function()
-    M.global_undo(state)
-  end, vim.tbl_extend('force', opts, { desc = 'Global undo' }))
-
-  vim.keymap.set('n', '<C-r>', function()
-    M.global_redo(state)
-  end, vim.tbl_extend('force', opts, { desc = 'Global redo' }))
 
   -- Execute cell and stay in edit mode
   vim.keymap.set({ 'n', 'i' }, '<C-CR>', function()
