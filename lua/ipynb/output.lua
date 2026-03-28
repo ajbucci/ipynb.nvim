@@ -19,7 +19,7 @@ end
 ---@param lines table[] Virtual lines array to append to
 ---@param text_plain string|table The text/plain data
 ---@param prefix string|nil Optional prefix for first line (e.g., "Out: ")
----@param hl string Highlight group
+---@param hl string|nil Highlight group
 local function add_text_plain_lines(lines, text_plain, prefix, hl)
   local text = to_string(text_plain)
 
@@ -48,10 +48,7 @@ function M.render_output(output)
   local images_mod = require('ipynb.images')
 
   if output.output_type == 'stream' then
-    local text = to_string(output.text)
-    for line in text:gmatch('[^\n]+') do
-      table.insert(lines, { { line, 'IpynbOutput' } })
-    end
+    add_text_plain_lines(lines, output.text, nil, 'IpynbOutput')
   elseif output.output_type == 'execute_result' then
     -- Check if this has image data
     local has_image = images_mod.get_image_data(output)
@@ -119,7 +116,13 @@ function M.build_output_text(cell)
   for _, output in ipairs(cell.outputs) do
     if output.output_type == 'stream' then
       local text = to_string(output.text)
-      for line in text:gmatch('[^\n]+') do
+
+      -- Match display behavior: trim one trailing newline but keep intentional blank lines
+      if text:sub(-1) == '\n' then
+        text = text:sub(1, -2)
+      end
+
+      for _, line in ipairs(vim.split(text, '\n', { plain = true })) do
         table.insert(lines, line)
       end
     elseif output.output_type == 'execute_result' then
