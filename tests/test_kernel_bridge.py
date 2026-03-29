@@ -81,8 +81,16 @@ class KernelBridgeTest:
         start = time.time()
         while time.time() - start < timeout:
             msg = self.read_message(timeout=0.5)
-            if msg and msg.get("type") == msg_type:
+            if not msg:
+                continue
+
+            if msg.get("type") == msg_type:
                 return msg
+
+            if msg.get("type") == "error":
+                raise AssertionError(
+                    f"Bridge error while waiting for '{msg_type}': {msg.get('error', 'Unknown error')}"
+                )
         return None
 
 
@@ -148,7 +156,7 @@ def test_code_execution():
         bridge.send({
             "action": "execute",
             "code": "print('Hello from test!')",
-            "cell_idx": 0
+            "cell_id": "cell-0"
         })
 
         # Collect messages until idle
@@ -193,7 +201,7 @@ def test_execution_count():
             bridge.send({
                 "action": "execute",
                 "code": f"x = {i}",
-                "cell_idx": i
+                "cell_id": f"cell-{i}"
             })
             # Wait for idle
             while True:
@@ -205,7 +213,7 @@ def test_execution_count():
         bridge.send({
             "action": "execute",
             "code": "y = 2",
-            "cell_idx": 2
+            "cell_id": "cell-2"
         })
 
         exec_input = bridge.wait_for_message("execute_input", timeout=10)
@@ -232,7 +240,7 @@ def test_execute_result():
         bridge.send({
             "action": "execute",
             "code": "1 + 1",
-            "cell_idx": 0
+            "cell_id": "cell-0"
         })
 
         # Collect until idle
@@ -274,7 +282,7 @@ def test_error_handling():
         bridge.send({
             "action": "execute",
             "code": "undefined_variable",
-            "cell_idx": 0
+            "cell_id": "cell-0"
         })
 
         # Collect until idle
@@ -316,7 +324,7 @@ def test_interrupt():
         bridge.send({
             "action": "execute",
             "code": "import time; time.sleep(60)",
-            "cell_idx": 0
+            "cell_id": "cell-0"
         })
 
         # Wait for busy state
@@ -350,7 +358,7 @@ def test_restart():
         bridge.send({
             "action": "execute",
             "code": "test_var = 'before_restart'",
-            "cell_idx": 0
+            "cell_id": "cell-before-restart"
         })
         while True:
             msg = bridge.read_message(timeout=10)
@@ -378,7 +386,7 @@ def test_restart():
         bridge.send({
             "action": "execute",
             "code": "test_var",
-            "cell_idx": 1
+            "cell_id": "cell-after-restart"
         })
 
         # Should get error (variable doesn't exist)

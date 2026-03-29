@@ -9,7 +9,7 @@ local M = {}
 ---@field kernel_id string|nil Kernel ID
 ---@field kernel_name string Kernel name (e.g., "python3")
 ---@field execution_state string Current state: "idle", "busy", "starting"
----@field pending_cells table<string, {cell_idx: number}> Cells waiting for execution
+---@field pending_cells table<string, {cell_id: string}> Cells waiting for execution
 ---@field callbacks table Async operation callbacks
 
 ---Create a new kernel state for a notebook
@@ -65,6 +65,25 @@ local function update_cell_field(state, cell_idx, field, value)
       require("ipynb.visuals").render_all(state)
     end
   end)
+end
+
+---Resolve a kernel message target to the current cell index by stable cell_id.
+---@param state NotebookState
+---@param msg table
+---@return number|nil cell_idx, Cell|nil cell
+local function resolve_message_cell(state, msg)
+  if msg.cell_id and type(msg.cell_id) == "string" then
+    for i, cell in ipairs(state.cells or {}) do
+      if cell.id == msg.cell_id then
+        return i, cell
+      end
+    end
+    -- Message was keyed by cell_id but target no longer exists (e.g. deleted).
+    -- Drop the message to avoid misrouting output to the wrong cell.
+    return nil, nil
+  end
+
+  return nil, nil
 end
 
 ---Set the notebook language (updates metadata, treesitter, and LSP)
@@ -161,26 +180,31 @@ local function handle_message(state, msg)
 
   elseif msg_type == "status" then
     kernel.execution_state = msg.state or "idle"
-    if msg.cell_idx and type(msg.cell_idx) == "number" then
-      update_cell_field(state, msg.cell_idx, "execution_state", msg.state)
-      if msg.state == "idle" then
-        kernel.pending_cells[msg.cell_idx] = nil
+    local target_idx = resolve_message_cell(state, msg)
+    if target_idx then
+      update_cell_field(state, target_idx, "execution_state", msg.state)
+    end
+    if msg.state == "idle" then
+      if msg.cell_id and type(msg.cell_id) == "string" then
+        kernel.pending_cells[msg.cell_id] = nil
       end
     end
 
   elseif msg_type == "execute_input" then
-    if msg.cell_idx and msg.execution_count then
-      update_cell_field(state, msg.cell_idx, "execution_count", msg.execution_count)
+    local target_idx = resolve_message_cell(state, msg)
+    if target_idx and msg.execution_count then
+      update_cell_field(state, target_idx, "execution_count", msg.execution_count)
     end
 
   elseif msg_type == "output" then
-    if msg.cell_idx and msg.output then
+    local target_idx, target_cell = resolve_message_cell(state, msg)
+    if target_idx and target_cell and msg.output then
       vim.schedule(function()
-        if state.cells and state.cells[msg.cell_idx] then
-          local cell = state.cells[msg.cell_idx]
-          cell.outputs = cell.outputs or {}
-          table.insert(cell.outputs, msg.output)
-          require("ipynb.output").render_outputs(state, msg.cell_idx)
+        local current_cell = state.cells and state.cells[target_idx] or nil
+        if current_cell and target_cell.id == current_cell.id then
+          current_cell.outputs = current_cell.outputs or {}
+          table.insert(current_cell.outputs, msg.output)
+          require("ipynb.output").render_outputs(state, target_idx)
         end
       end)
     end
@@ -489,17 +513,27 @@ function M.execute(state, cell_idx)
     return false
   end
 
+  -- Ensure the cell has a stable ID before execution routing.
+  if not cell.id or cell.id == "" then
+    local state_mod = require("ipynb.state")
+    local id = state_mod.generate_cell_id(state.cell_ids)
+    state.cell_ids[id] = true
+    cell.id = id
+  end
+
   require("ipynb.output").clear_outputs(state, cell_idx)
 
   cell.execution_state = "busy"
-  state.kernel.pending_cells[cell_idx] = { cell_idx = cell_idx }
+  state.kernel.pending_cells[cell.id] = {
+    cell_id = cell.id,
+  }
 
   require("ipynb.visuals").render_all(state)
 
   return send_command(state, {
     action = "execute",
     code = cell.source,
-    cell_idx = cell_idx,
+    cell_id = cell.id,
   })
 end
 

@@ -138,20 +138,23 @@ class KernelBridge:
 
         # Find the cell this message belongs to
         exec_info = self.pending_executions.get(msg_id, {})
-        cell_idx = exec_info.get("cell_idx")
+        cell_id = exec_info.get("cell_id")
 
         if msg_type == "status":
             execution_state = content.get("execution_state", "")
             self.send_message({
                 "type": "status",
                 "state": execution_state,
-                "cell_idx": cell_idx
+                "cell_id": cell_id
             })
+            if execution_state == "idle":
+                # Execution is complete, drop tracking to prevent unbounded growth.
+                self.pending_executions.pop(msg_id, None)
 
         elif msg_type == "stream":
             self.send_message({
                 "type": "output",
-                "cell_idx": cell_idx,
+                "cell_id": cell_id,
                 "output": {
                     "output_type": "stream",
                     "name": content.get("name", "stdout"),
@@ -162,7 +165,7 @@ class KernelBridge:
         elif msg_type == "execute_result":
             self.send_message({
                 "type": "output",
-                "cell_idx": cell_idx,
+                "cell_id": cell_id,
                 "output": {
                     "output_type": "execute_result",
                     "execution_count": content.get("execution_count"),
@@ -174,7 +177,7 @@ class KernelBridge:
         elif msg_type == "display_data":
             self.send_message({
                 "type": "output",
-                "cell_idx": cell_idx,
+                "cell_id": cell_id,
                 "output": {
                     "output_type": "display_data",
                     "data": content.get("data", {}),
@@ -185,7 +188,7 @@ class KernelBridge:
         elif msg_type == "error":
             self.send_message({
                 "type": "output",
-                "cell_idx": cell_idx,
+                "cell_id": cell_id,
                 "output": {
                     "output_type": "error",
                     "ename": content.get("ename", "Error"),
@@ -198,46 +201,52 @@ class KernelBridge:
             # Execution started
             self.send_message({
                 "type": "execute_input",
-                "cell_idx": cell_idx,
+                "cell_id": cell_id,
                 "execution_count": content.get("execution_count")
             })
 
-    def execute(self, code: str, cell_idx: int, user_expressions: Optional[Dict[str, str]] = None) -> Optional[str]:
+    def execute(
+        self,
+        code: str,
+        cell_id: str,
+        user_expressions: Optional[Dict[str, str]] = None,
+    ) -> Optional[str]:
         """Execute code in the kernel with optional user_expressions for namespace capture."""
         if not self.kernel_client:
             self.send_message({
                 "type": "error",
-                "error": "No kernel connected"
+                "error": "No kernel connected",
+                "cell_id": cell_id
             })
             return None
 
         try:
             msg_id = self.kernel_client.execute(code, user_expressions=user_expressions or {})
             self.pending_executions[msg_id] = {
-                "cell_idx": cell_idx,
+                "cell_id": cell_id,
                 "code": code,
                 "has_user_expressions": bool(user_expressions)
             }
             self.send_message({
                 "type": "execute_request",
-                "cell_idx": cell_idx,
+                "cell_id": cell_id,
                 "msg_id": msg_id
             })
 
             # If user_expressions provided, wait for execute_reply on shell channel
             if user_expressions:
-                self._wait_for_execute_reply(msg_id, cell_idx)
+                self._wait_for_execute_reply(msg_id, cell_id)
 
             return msg_id
         except Exception as e:
             self.send_message({
                 "type": "error",
                 "error": f"Execution failed: {str(e)}",
-                "cell_idx": cell_idx
+                "cell_id": cell_id
             })
             return None
 
-    def _wait_for_execute_reply(self, msg_id: str, cell_idx: int):
+    def _wait_for_execute_reply(self, msg_id: str, cell_id: str):
         """Wait for execute_reply on shell channel and extract user_expressions results."""
         try:
             # Poll shell channel for the execute_reply (with timeout)
@@ -257,7 +266,7 @@ class KernelBridge:
                             ns_data = ns_result.get("data", {}).get("text/plain", "{}")
                             self.send_message({
                                 "type": "namespace",
-                                "cell_idx": cell_idx,
+                                "cell_id": cell_id,
                                 "namespace_repr": ns_data
                             })
                         elif ns_result.get("status") == "error":
@@ -459,9 +468,15 @@ def main():
 
             elif action == "execute":
                 code = cmd.get("code", "")
-                cell_idx = cmd.get("cell_idx", 0)
+                cell_id = cmd.get("cell_id")
+                if not isinstance(cell_id, str) or not cell_id:
+                    bridge.send_message({
+                        "type": "error",
+                        "error": "Missing required cell_id for execute action"
+                    })
+                    continue
                 user_expressions = cmd.get("user_expressions")
-                bridge.execute(code, cell_idx, user_expressions)
+                bridge.execute(code, cell_id, user_expressions)
 
             elif action == "interrupt":
                 bridge.interrupt()
