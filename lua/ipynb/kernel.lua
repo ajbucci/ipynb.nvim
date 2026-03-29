@@ -10,6 +10,7 @@ local M = {}
 ---@field kernel_name string Kernel name (e.g., "python3")
 ---@field execution_state string Current state: "idle", "busy", "starting"
 ---@field pending_cells table<string, {cell_id: string}> Cells waiting for execution
+---@field cell_index_by_id table<string, number> Cached cell_id -> index map
 ---@field callbacks table Async operation callbacks
 
 ---Create a new kernel state for a notebook
@@ -22,6 +23,7 @@ local function create_kernel_state()
     kernel_name = "python3",
     execution_state = "idle",
     pending_cells = {},
+    cell_index_by_id = {},
     callbacks = {
       complete = nil,
       inspect = {},
@@ -67,17 +69,47 @@ local function update_cell_field(state, cell_idx, field, value)
   end)
 end
 
+---Rebuild the cell_id -> index cache for fast kernel message routing.
+---@param state NotebookState
+local function rebuild_cell_index_map(state)
+  if not state.kernel then
+    return
+  end
+  local map = {}
+  for i, cell in ipairs(state.cells or {}) do
+    if cell.id and type(cell.id) == "string" then
+      map[cell.id] = i
+    end
+  end
+  state.kernel.cell_index_by_id = map
+end
+
 ---Resolve a kernel message target to the current cell index by stable cell_id.
 ---@param state NotebookState
 ---@param msg table
 ---@return number|nil cell_idx, Cell|nil cell
 local function resolve_message_cell(state, msg)
   if msg.cell_id and type(msg.cell_id) == "string" then
-    for i, cell in ipairs(state.cells or {}) do
-      if cell.id == msg.cell_id then
-        return i, cell
+    local map = state.kernel and state.kernel.cell_index_by_id or nil
+    local idx = map and map[msg.cell_id] or nil
+    if idx then
+      local cell = state.cells and state.cells[idx] or nil
+      if cell and cell.id == msg.cell_id then
+        return idx, cell
       end
     end
+
+    -- Cache may be stale after insert/delete/move/undo; rebuild and retry once.
+    rebuild_cell_index_map(state)
+    map = state.kernel and state.kernel.cell_index_by_id or nil
+    idx = map and map[msg.cell_id] or nil
+    if idx then
+      local cell = state.cells and state.cells[idx] or nil
+      if cell and cell.id == msg.cell_id then
+        return idx, cell
+      end
+    end
+
     -- Message was keyed by cell_id but target no longer exists (e.g. deleted).
     -- Drop the message to avoid misrouting output to the wrong cell.
     return nil, nil
@@ -519,6 +551,9 @@ function M.execute(state, cell_idx)
     local id = state_mod.generate_cell_id(state.cell_ids)
     state.cell_ids[id] = true
     cell.id = id
+    if state.kernel and state.kernel.cell_index_by_id then
+      state.kernel.cell_index_by_id[id] = cell_idx
+    end
   end
 
   require("ipynb.output").clear_outputs(state, cell_idx)
