@@ -126,6 +126,7 @@ local function handle_range_format(ctx, method, params, handler, client, _req_bu
   end
 
   local cells_mod = require('ipynb.cells')
+  local shadow = require('ipynb.lsp.shadow')
 
   -- Edit buffer: range is always within single cell (the one being edited)
   if ctx.is_edit_buf and state.edit_state then
@@ -185,6 +186,7 @@ local function handle_range_format(ctx, method, params, handler, client, _req_bu
 
     -- Make the request to shadow buffer through the original client.request
     local orig_request = rawget(client, '_orig_request') or client.request
+    shadow.flush_shadow_write(state)
     return true, select(2, orig_request(client, method, rewritten_params, wrapped_handler, state.shadow_buf))
   end
 
@@ -252,6 +254,7 @@ local function handle_range_format(ctx, method, params, handler, client, _req_bu
   end
 
   local orig_request = rawget(client, '_orig_request') or client.request
+  shadow.flush_shadow_write(state)
   return true, select(2, orig_request(client, method, rewritten_params, wrapped_handler, state.shadow_buf))
 end
 
@@ -299,6 +302,9 @@ function M.format_cell(state, cell_idx, callback)
     if callback then callback() end
     return
   end
+
+  -- Ensure on-disk shadow file is up to date for servers that read from URI path.
+  shadow.flush_shadow_write(state)
 
   -- Build formatting request params
   local params = {

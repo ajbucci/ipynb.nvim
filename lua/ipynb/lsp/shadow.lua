@@ -4,6 +4,51 @@
 
 local M = {}
 
+---Get configured shadow-write debounce delay in ms
+---@return number
+local function get_shadow_debounce_ms()
+  local cfg = require('ipynb.config').get()
+  local shadow_cfg = (cfg and cfg.shadow) or {}
+  local delay = tonumber(shadow_cfg.debounce_ms) or 400
+  if delay < 0 then
+    delay = 0
+  end
+  return math.floor(delay)
+end
+
+---Write current shadow buffer content to disk
+---@param state NotebookState
+---@return boolean
+local function write_shadow_to_disk(state)
+  if not state.shadow_path then
+    state._shadow_write_pending = false
+    return false
+  end
+  if not state.shadow_buf or not vim.api.nvim_buf_is_valid(state.shadow_buf) then
+    state._shadow_write_pending = false
+    return false
+  end
+
+  local lines = vim.api.nvim_buf_get_lines(state.shadow_buf, 0, -1, false)
+  local ok = pcall(vim.fn.writefile, lines, state.shadow_path)
+  state._shadow_write_pending = false
+  if ok then
+    vim.bo[state.shadow_buf].modified = false
+  end
+  return ok
+end
+
+---Stop a pending shadow-write timer without closing it
+---@param state NotebookState
+local function stop_shadow_write_timer(state)
+  if not state then
+    return
+  end
+  if state._shadow_write_timer then
+    pcall(state._shadow_write_timer.stop, state._shadow_write_timer)
+  end
+end
+
 ---Get language info from notebook metadata
 ---@param state NotebookState
 ---@return string language (e.g., "python", "julia", "r")
@@ -114,6 +159,7 @@ function M.create_shadow(state)
 
   -- Write to disk for LSP
   vim.fn.writefile(shadow_lines, shadow_path)
+  state._shadow_write_pending = false
 
   -- Configure for LSP (don't set buftype - need it to be normal for LSP to attach)
   vim.bo[shadow_buf].filetype = lang
@@ -207,11 +253,81 @@ function M.refresh_shadow(state)
   local shadow_lines = M.generate_shadow_lines(state)
   vim.api.nvim_buf_set_lines(state.shadow_buf, 0, -1, false, shadow_lines)
 
+  -- Cancel pending debounced write before full refresh write.
+  stop_shadow_write_timer(state)
+
   -- Update temp file for LSP
   vim.fn.writefile(shadow_lines, state.shadow_path)
+  state._shadow_write_pending = false
 
   -- Clear modified to prevent save warnings
   vim.bo[state.shadow_buf].modified = false
+end
+
+---Schedule writing the shadow buffer to disk after a debounce delay.
+---@param state NotebookState
+---@param delay_ms number|nil
+function M.schedule_shadow_write(state, delay_ms)
+  if not state.shadow_path then
+    return
+  end
+  if not state.shadow_buf or not vim.api.nvim_buf_is_valid(state.shadow_buf) then
+    return
+  end
+
+  state._shadow_write_pending = true
+  delay_ms = delay_ms or get_shadow_debounce_ms()
+  if delay_ms <= 0 then
+    write_shadow_to_disk(state)
+    return
+  end
+
+  local timer = state._shadow_write_timer
+  if not timer then
+    timer = vim.uv.new_timer()
+    if not timer then
+      write_shadow_to_disk(state)
+      return
+    end
+    state._shadow_write_timer = timer
+  end
+
+  stop_shadow_write_timer(state)
+  local ok = pcall(timer.start, timer, delay_ms, 0, vim.schedule_wrap(function()
+    if state._shadow_write_timer ~= timer then
+      return
+    end
+    write_shadow_to_disk(state)
+  end))
+  if not ok then
+    write_shadow_to_disk(state)
+  end
+end
+
+---Force a pending shadow write to disk immediately.
+---@param state NotebookState
+function M.flush_shadow_write(state)
+  if not state then
+    return
+  end
+  stop_shadow_write_timer(state)
+  if state._shadow_write_pending then
+    write_shadow_to_disk(state)
+  end
+end
+
+---Cleanup shadow-write timer for a notebook state.
+---@param state NotebookState
+function M.cleanup_shadow_write(state)
+  if not state then
+    return
+  end
+  stop_shadow_write_timer(state)
+  if state._shadow_write_timer then
+    pcall(state._shadow_write_timer.close, state._shadow_write_timer)
+    state._shadow_write_timer = nil
+  end
+  state._shadow_write_pending = false
 end
 
 ---Sync a region of the shadow buffer after an edit
@@ -239,9 +355,8 @@ function M.sync_shadow_region(state, start_line, old_end_line, new_lines, cell_t
 
   vim.api.nvim_buf_set_lines(state.shadow_buf, start_line, old_end_line, false, shadow_lines)
 
-  -- Update temp file for LSP
-  local all_lines = vim.api.nvim_buf_get_lines(state.shadow_buf, 0, -1, false)
-  vim.fn.writefile(all_lines, state.shadow_path)
+  -- Debounce disk writes; LSP still sees immediate in-memory buffer changes.
+  M.schedule_shadow_write(state)
 
   -- Clear modified to prevent save warnings
   vim.bo[state.shadow_buf].modified = false

@@ -46,6 +46,26 @@ local function lazy_path()
   return join(app_data_dir(), 'lazy/lazy.nvim')
 end
 
+local function bootstrap_ready()
+  if not vim.loop.fs_stat(lazy_path()) then
+    return false
+  end
+
+  local lazy_root = join(app_data_dir(), 'lazy')
+  local required = {
+    join(lazy_root, 'nvim-treesitter'),
+    join(lazy_root, 'nvim-lspconfig'),
+  }
+
+  for _, path in ipairs(required) do
+    if not vim.loop.fs_stat(path) then
+      return false
+    end
+  end
+
+  return true
+end
+
 local function bootstrap_lazy()
   if not exe('git') then
     print('WARN: git not found; skipping bootstrap')
@@ -53,11 +73,17 @@ local function bootstrap_lazy()
   end
 
   local target = lazy_path()
-  if vim.loop.fs_stat(target) then
+  local lazy_entry = join(target, 'lua/lazy/init.lua')
+  if vim.loop.fs_stat(lazy_entry) then
     return true
   end
 
-  vim.fn.mkdir(target, 'p')
+  if vim.loop.fs_stat(target) then
+    print('WARN: found incomplete lazy.nvim checkout; re-cloning')
+    vim.fn.delete(target, 'rf')
+  end
+
+  vim.fn.mkdir(vim.fn.fnamemodify(target, ':h'), 'p')
   local result = vim.system({
     'git',
     'clone',
@@ -72,6 +98,11 @@ local function bootstrap_lazy()
     if result.stderr and result.stderr ~= '' then
       print(result.stderr)
     end
+    return false
+  end
+
+  if not vim.loop.fs_stat(lazy_entry) then
+    print('WARN: lazy.nvim clone missing expected files')
     return false
   end
 
@@ -113,6 +144,11 @@ local function bootstrap_plugins()
     return false
   end
 
+  if not bootstrap_ready() then
+    print('WARN: bootstrap completed but required plugins are still missing')
+    return false
+  end
+
   return true
 end
 
@@ -151,12 +187,10 @@ local function ensure_venv_lsp()
     vim.system({ pip, 'install', '--upgrade', 'pip' }, { text = true }):wait()
     vim.system({ pip, 'install', 'basedpyright' }, { text = true }):wait()
   end
-
   local ruff = venv_bin(venv_dir, 'ruff')
   if not vim.loop.fs_stat(ruff) then
     vim.system({ pip, 'install', 'ruff' }, { text = true }):wait()
   end
-
   if vim.loop.fs_stat(basedpyright) then
     vim.env.IPYNB_TEST_LSP_BIN = basedpyright
     vim.env.IPYNB_TEST_LSP_ARGS = '--stdio'
@@ -324,7 +358,7 @@ end
 ensure_env()
 
 if vim.env.IPYNB_TEST_SKIP_BOOTSTRAP ~= '1' then
-  if vim.env.IPYNB_TEST_FORCE_BOOTSTRAP == '1' or not vim.loop.fs_stat(lazy_path()) then
+  if vim.env.IPYNB_TEST_FORCE_BOOTSTRAP == '1' or not bootstrap_ready() then
     bootstrap_plugins()
   else
     print('Bootstrap already present; skipping. Set IPYNB_TEST_FORCE_BOOTSTRAP=1 to force.')
@@ -345,6 +379,7 @@ local tests = {
   join(root, 'tests/test_modified.lua'),
   join(root, 'tests/test_undo.lua'),
   join(root, 'tests/test_io.lua'),
+  join(root, 'tests/test_shadow.lua'),
   join(root, 'tests/test_lsp.lua'),
   join(root, 'tests/test_lsp_go.lua'),
   join(root, 'tests/test_treesitter_autoinstall.lua'),

@@ -31,6 +31,8 @@ M.create_shadow = shadow.create_shadow
 M.attach_lsp = shadow.attach_lsp
 M.refresh_shadow = shadow.refresh_shadow
 M.sync_shadow_region = shadow.sync_shadow_region
+M.schedule_shadow_write = shadow.schedule_shadow_write
+M.flush_shadow_write = shadow.flush_shadow_write
 
 -- Re-export diagnostics functions
 M.setup_diagnostics_proxy = diagnostics.setup_diagnostics_proxy

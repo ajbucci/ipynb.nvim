@@ -46,6 +46,8 @@ local M = {}
 ---@field facade_path string Original .ipynb file path (same as source_path)
 ---@field shadow_buf number|nil Hidden buffer for LSP (code cells only)
 ---@field shadow_path string|nil Temp .py file path for shadow buffer
+---@field _shadow_write_timer uv_timer_t|nil Debounce timer for shadow file writes
+---@field _shadow_write_pending boolean|nil Whether a debounced shadow write is pending
 ---@field source_path string Original .ipynb path
 ---@field namespace number Extmark namespace
 ---@field edit_state EditState|nil
@@ -107,6 +109,8 @@ function M.create(source_path)
     facade_path = '',
     shadow_buf = nil,
     shadow_path = nil,
+    _shadow_write_timer = nil,
+    _shadow_write_pending = false,
     source_path = abs_path,
     namespace = vim.api.nvim_create_namespace('notebook_' .. abs_path),
     edit_state = nil,
@@ -201,6 +205,10 @@ function M.remove(buf)
     end
 
     -- Cleanup shadow buffer and temp file
+    local shadow_ok, shadow_mod = pcall(require, 'ipynb.lsp.shadow')
+    if shadow_ok then
+      shadow_mod.cleanup_shadow_write(state)
+    end
     if state.shadow_buf and vim.api.nvim_buf_is_valid(state.shadow_buf) then
       vim.api.nvim_buf_delete(state.shadow_buf, { force = true })
     end

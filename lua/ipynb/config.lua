@@ -12,6 +12,7 @@ local M = {}
 ---@field inspector InspectorConfig
 ---@field folding FoldingConfig
 ---@field format FormatConfig
+---@field shadow ShadowConfig
 
 ---@class FloatConfig
 ---@field width number Window width as fraction of screen (0-1) - used for centered mode
@@ -67,6 +68,7 @@ local M = {}
 ---@class ShadowConfig
 ---@field location "temp"|"workspace" Location for shadow file (default: "temp")
 ---@field dir string Directory name used when location="workspace" (default: ".ipynb.nvim")
+---@field debounce_ms number Debounce delay for shadow file disk writes (default: 400)
 
 ---@class HighlightConfig Highlight groups to link to (use existing groups or define your own)
 ---@field border string Cell border color (default: 'Comment')
@@ -190,15 +192,16 @@ M.defaults = {
 	folding = {
 		hide_output = false, -- Include end marker in fold to hide output when folded
 	},
-	format = {
-		enabled = true, -- Wrap vim.lsp.buf.format() to work with notebooks
-		trailing_blank_lines = 0, -- Max trailing blank lines to keep after formatting
-	},
-	shadow = {
-		location = "temp", -- "temp" (default) or "workspace"
-		dir = ".ipynb.nvim",
-	},
-}
+		format = {
+			enabled = true, -- Wrap vim.lsp.buf.format() to work with notebooks
+			trailing_blank_lines = 0, -- Max trailing blank lines to keep after formatting
+		},
+		shadow = {
+			location = "temp", -- "temp" (default) or "workspace"
+			dir = ".ipynb.nvim",
+			debounce_ms = 400,
+		},
+	}
 
 -- Current configuration (populated by setup)
 ---@type NotebookConfig
