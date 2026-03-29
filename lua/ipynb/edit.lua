@@ -93,6 +93,10 @@ local function update_edit_window_height(edit, line_count)
     vim.api.nvim_win_call(edit.win, function()
       local view = vim.fn.winsaveview()
       vim.api.nvim_win_set_height(edit.win, math.max(line_count, 1))
+      -- Edit floats are sized to full cell content, so keep viewport anchored
+      -- to the first line. This avoids "o" from clipping the previous line
+      -- when a 1-line float grows and Neovim had scrolled topline to 2.
+      view.topline = 1
       vim.fn.winrestview(view)
     end)
   end
