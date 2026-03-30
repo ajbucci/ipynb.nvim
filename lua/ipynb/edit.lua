@@ -106,16 +106,69 @@ end
 ---@param cell Cell
 ---@param lines string[]
 ---@return number buf
+local function replace_buf_lines(buf, lines)
+  local was_modifiable = vim.bo[buf].modifiable
+  if not was_modifiable then
+    vim.bo[buf].modifiable = true
+  end
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modified = false
+  if not was_modifiable then
+    vim.bo[buf].modifiable = false
+  end
+end
+
+---@param name string
+---@return number|nil
+local function find_buffer_by_name(name)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf) == name then
+      return buf
+    end
+  end
+  return nil
+end
+
 local function get_or_create_edit_buf(cell, lines)
   -- Reuse existing buffer if valid (preserves undo history)
   if cell.edit_buf and vim.api.nvim_buf_is_valid(cell.edit_buf) then
     -- Refresh content from facade (may have changed via undo/redo)
     local current = vim.api.nvim_buf_get_lines(cell.edit_buf, 0, -1, false)
     if table.concat(current, '\n') ~= table.concat(lines, '\n') then
-      vim.api.nvim_buf_set_lines(cell.edit_buf, 0, -1, false, lines)
-      vim.bo[cell.edit_buf].modified = false
+      replace_buf_lines(cell.edit_buf, lines)
     end
     return cell.edit_buf
+  end
+
+  -- Resolve language and intended buffer name before creating a new buffer.
+  local state = require('ipynb.state').get()
+  local lang = 'python' -- default
+  if cell.type == 'code' then
+    if state and state.facade_buf then
+      lang = vim.b[state.facade_buf].ipynb_language or 'python'
+    end
+  else
+    lang = 'markdown'
+  end
+  local notebook_name = state and state.source_path and vim.fn.fnamemodify(state.source_path, ':t') or 'notebook'
+  local buffer_name = string.format('[%s:%s]', notebook_name, cell.id or 'cell')
+
+  -- Reuse hidden buffer with the same name (common after reload/reopen) to avoid E95.
+  local existing = find_buffer_by_name(buffer_name)
+  if existing and vim.api.nvim_buf_is_valid(existing) then
+    M.register_edit_buffer(existing)
+    vim.bo[existing].bufhidden = 'hide'
+    vim.bo[existing].buftype = 'acwrite'
+    vim.bo[existing].swapfile = false
+    vim.bo[existing].filetype = lang
+    pcall(vim.treesitter.start, existing, lang)
+    vim.b[existing].ipynb_edit_lang = lang
+    local current = vim.api.nvim_buf_get_lines(existing, 0, -1, false)
+    if table.concat(current, '\n') ~= table.concat(lines, '\n') then
+      replace_buf_lines(existing, lines)
+    end
+    cell.edit_buf = existing
+    return existing
   end
 
   -- Create new buffer (unlisted, not scratch - we'll set buftype manually)
@@ -124,20 +177,12 @@ local function get_or_create_edit_buf(cell, lines)
   -- Register as edit buffer to suppress change tracking errors
   M.register_edit_buffer(buf)
 
-  -- Use language from notebook metadata for code cells (stored in facade buffer variable)
-  local lang = 'python' -- default
-  local state = require('ipynb.state').get()
-  if cell.type == 'code' then
-    if state and state.facade_buf then
-      lang = vim.b[state.facade_buf].ipynb_language or 'python'
-    end
-  else
-    lang = 'markdown'
-  end
-
   -- Give buffer a name (required for :w to work with acwrite)
-  local notebook_name = state and state.source_path and vim.fn.fnamemodify(state.source_path, ':t') or 'notebook'
-  vim.api.nvim_buf_set_name(buf, string.format('[%s:%s]', notebook_name, cell.id or 'cell'))
+  local ok_named = pcall(vim.api.nvim_buf_set_name, buf, buffer_name)
+  if not ok_named then
+    -- Last-resort suffix avoids hard failure if another buffer races this name.
+    vim.api.nvim_buf_set_name(buf, string.format('%s#%d', buffer_name, buf))
+  end
 
   vim.bo[buf].bufhidden = 'hide' -- Keep buffer when window closes
   -- Use 'acwrite' so :w triggers BufWriteCmd instead of E382 error
@@ -172,8 +217,7 @@ local function get_or_create_edit_buf(cell, lines)
 
   -- Enable undo in edit buffers for natural undo behavior while typing
   -- Facade undo syncs at natural break points (InsertLeave, etc.)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modified = false
+  replace_buf_lines(buf, lines)
 
   -- Store in cell for reuse
   cell.edit_buf = buf

@@ -329,12 +329,17 @@ function M.get_image_virt_lines(state, cell, output, image_index)
 	-- Write to cache file
 	local cache_dir = get_cache_dir()
 	local ext = MIME_EXTENSIONS[mime] or "png"
-	local filename = string.format("%s-%d.%s", cell_id, image_index, ext)
+	local data_hash = vim.fn.sha256(image_data):sub(1, 12)
+	local filename = string.format("%s-%d-%s.%s", cell_id, image_index, data_hash, ext)
 	local path = cache_dir .. "/" .. filename
 
 	if not write_binary_file(path, file_content) then
 		return nil, 0
 	end
+
+	-- File content may have changed between executions for the same cell/image index.
+	-- Drop cached object so snacks reloads fresh bytes from disk.
+	image_cache[path] = nil
 
 	-- Get or create snacks Image (handles sending image data to terminal)
 	local img = get_or_create_image(path)
@@ -456,6 +461,10 @@ function M.clear_images(state, cell_id)
 	local ok, Snacks = pcall(require, "snacks")
 	if ok and Snacks.image and Snacks.image.terminal then
 		for _, entry in ipairs(state.images[cell_id]) do
+			if entry.path then
+				image_cache[entry.path] = nil
+				pcall(vim.fn.delete, entry.path)
+			end
 			if entry.img and entry.placement_id then
 				pcall(Snacks.image.terminal.request, {
 					a = "d",

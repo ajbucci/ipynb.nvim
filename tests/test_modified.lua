@@ -183,6 +183,42 @@ h.run_test('changedtick_prevents_spurious_sync', function()
 end)
 
 --------------------------------------------------------------------------------
+-- Test: Name collision does not block edit mode (E95 regression)
+-- Create a conflicting hidden buffer with the exact target name, then open edit.
+-- Expected: edit opens successfully and write still works.
+--------------------------------------------------------------------------------
+h.run_test('edit_name_collision_no_e95', function()
+  local state = h.open_notebook('simple.ipynb')
+  local cell = state.cells[1]
+  h.assert_true(cell ~= nil and cell.id ~= nil, 'Cell 1 should have a stable id')
+
+  local notebook_name = vim.fn.fnamemodify(state.source_path, ':t')
+  local collision_name = string.format('[%s:%s]', notebook_name, cell.id)
+
+  -- Simulate stale conflicting buffer left behind by previous session.
+  local conflict = vim.api.nvim_create_buf(false, false)
+  vim.api.nvim_buf_set_name(conflict, collision_name)
+  vim.bo[conflict].bufhidden = 'hide'
+  vim.api.nvim_buf_set_lines(conflict, 0, -1, false, { 'FOREIGN BUFFER' })
+
+  local ok, err = pcall(function()
+    h.enter_cell(1)
+  end)
+  h.assert_true(ok, 'Entering edit should not fail with E95: ' .. tostring(err))
+
+  local edit_buf = h.get_edit_buf()
+  h.assert_true(edit_buf ~= nil and vim.api.nvim_buf_is_valid(edit_buf), 'Should open a valid edit buffer')
+  h.assert_false(edit_buf == conflict, 'Should not reuse a foreign conflicting buffer')
+
+  local content = h.get_edit_buffer_content() or ''
+  h.assert_false(content == 'FOREIGN BUFFER', 'Edit buffer content should come from the cell, not conflict buffer')
+
+  -- Verify write support is configured on the resulting edit buffer.
+  local write_cmds = vim.api.nvim_get_autocmds({ event = 'BufWriteCmd', buffer = edit_buf })
+  h.assert_true(#write_cmds > 0, 'Edit buffer should have BufWriteCmd handler')
+end)
+
+--------------------------------------------------------------------------------
 -- Print summary and exit
 --------------------------------------------------------------------------------
 local success = h.summary()
