@@ -374,6 +374,15 @@ The parser should auto-compile on first load. If it fails:
 Ensure you have a language server installed for the notebook's language.
 Check `:LspInfo` while in the notebook to see attached clients.
 
+**Python imports unresolved in diagnostics, but code executes**
+
+If you see diagnostics like `Import "numpy" could not be resolved` while notebook execution works:
+
+- LSP and Jupyter kernel are separate processes and may use different Python environments
+- Check kernel Python: run `import sys; print(sys.executable)` in a cell
+- Configure your Python LSP (`pyright`/`basedpyright`) to use the same interpreter (for example, project `.venv`)
+- For notebooks, consider `shadow.location = "workspace"` so LSP runs with project context instead of temp paths
+
 **Kernel won't start**
 
 Check `:NotebookKernelStatus` for the Python path being used.
@@ -383,6 +392,13 @@ For non-Python kernels, ensure the kernel is installed (e.g., IJulia, IRkernel).
 **Images not showing**
 
 Requires snacks.nvim and a terminal which fully supports the kitty graphics protocol (kitty, Ghostty). For tmux, set `allow-passthrough=on`.
+
+**`[Image failed to load]` even when terminal support is true**
+
+If `:lua print(require("snacks").image.supports_terminal())` returns `true` but images still fail:
+
+- Run `:checkhealth snacks` (not just `:checkhealth ipynb`)
+- Ensure ImageMagick tools are installed (`magick`/`convert`) for non-PNG conversion
 
 ## 🗺️ Roadmap
 
