@@ -139,6 +139,7 @@ The plugin reads the language from notebook metadata and automatically configure
 - **Syntax highlighting** via tree-sitter language injection
 - **LSP** by setting the shadow buffer's filetype (triggers your LSP config)
 - **Kernel execution** via `jupyter_client` (supports any installed Jupyter kernel)
+- **Blocking `input()` support** via floating prompt UI (`getpass` uses secure masked fallback)
 
 The default language when creating a new notebook is Python. You can specify a kernel when creating:
 
@@ -389,6 +390,11 @@ Check `:NotebookKernelStatus` for the Python path being used.
 Ensure `jupyter_client` is installed: `pip install jupyter_client`
 For non-Python kernels, ensure the kernel is installed (e.g., IJulia, IRkernel).
 
+**`input()` appears stuck**
+
+The kernel is waiting for stdin. Enter text in the floating prompt and press `<CR>`.
+Press `<Esc>` / `<C-c>` to cancel (the plugin interrupts the kernel).
+
 **Images not showing**
 
 Requires snacks.nvim and a terminal which fully supports the kitty graphics protocol (kitty, Ghostty). For tmux, set `allow-passthrough=on`.
@@ -407,6 +413,7 @@ If `:lua print(require("snacks").image.supports_terminal())` returns `true` but 
 - [x] Read/write .ipynb files
 - [x] Cell navigation and editing
 - [x] Kernel execution and output capture
+- [x] Blocking stdin input prompts (`input()` / `getpass`)
 - [x] Inline image rendering
 - [x] Variable inspector (Jupyter inspect protocol, auto-hover)
 - [x] Partial LSP support (diagnostics, completion, hover, definition, references, rename, formatting, document symbols, signature help, document highlight, inlay hints)

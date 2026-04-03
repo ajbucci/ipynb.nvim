@@ -309,6 +309,60 @@ def test_error_handling():
         bridge.stop()
 
 
+def test_stdin_input_request_reply():
+    """Test input_request/input_reply roundtrip."""
+    bridge = KernelBridgeTest()
+    try:
+        bridge.start()
+        bridge.read_message()  # consume ready
+
+        # Start kernel
+        bridge.send({"action": "start", "kernel_name": "python3"})
+        bridge.wait_for_message("kernel_started", timeout=30)
+
+        # Execute code that requires stdin input
+        bridge.send({
+            "action": "execute",
+            "code": "name = input('Name: '); print('Hello', name)",
+            "cell_id": "cell-input"
+        })
+
+        input_req = bridge.wait_for_message("input_request", timeout=10)
+        assert input_req is not None, "Missing input_request"
+        assert input_req.get("request_id"), "Missing request_id in input_request"
+        assert "Name:" in input_req.get("prompt", ""), "Unexpected prompt"
+
+        bridge.send({
+            "action": "input_reply",
+            "request_id": input_req["request_id"],
+            "value": "Mohan",
+        })
+
+        messages = []
+        while True:
+            msg = bridge.read_message(timeout=10)
+            if msg is None:
+                break
+            messages.append(msg)
+            if msg.get("type") == "status" and msg.get("state") == "idle":
+                break
+
+        output_msg = next(
+            (
+                m for m in messages
+                if m.get("type") == "output"
+                and m.get("output", {}).get("output_type") == "stream"
+                and "Hello Mohan" in m.get("output", {}).get("text", "")
+            ),
+            None,
+        )
+        assert output_msg is not None, "Missing expected stream output after input_reply"
+
+        print("PASS: Stdin input_request/input_reply works")
+    finally:
+        bridge.stop()
+
+
 def test_interrupt():
     """Test kernel interrupt."""
     bridge = KernelBridgeTest()
@@ -421,6 +475,7 @@ def run_all_tests():
         test_execution_count,
         test_execute_result,
         test_error_handling,
+        test_stdin_input_request_reply,
         test_interrupt,
         test_restart,
     ]

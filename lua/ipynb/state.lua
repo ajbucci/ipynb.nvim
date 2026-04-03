@@ -48,6 +48,7 @@ local M = {}
 ---@field shadow_path string|nil Temp .py file path for shadow buffer
 ---@field _shadow_write_timer uv_timer_t|nil Debounce timer for shadow file writes
 ---@field _shadow_write_pending boolean|nil Whether a debounced shadow write is pending
+---@field _input_state table|nil Active kernel stdin prompt state
 ---@field source_path string Original .ipynb path
 ---@field namespace number Extmark namespace
 ---@field edit_state EditState|nil
@@ -111,6 +112,7 @@ function M.create(source_path)
     shadow_path = nil,
     _shadow_write_timer = nil,
     _shadow_write_pending = false,
+    _input_state = nil,
     source_path = abs_path,
     namespace = vim.api.nvim_create_namespace('notebook_' .. abs_path),
     edit_state = nil,

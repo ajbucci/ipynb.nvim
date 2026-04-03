@@ -10,6 +10,7 @@ import json
 import sys
 import threading
 import queue
+import uuid
 from typing import Optional, Dict, Any
 
 from inspect_parsers import get_parser
@@ -36,6 +37,8 @@ class KernelBridge:
         self.execution_count: int = 0
         self.pending_executions: Dict[str, Dict[str, Any]] = {}
         self.iopub_thread: Optional[threading.Thread] = None
+        self.stdin_thread: Optional[threading.Thread] = None
+        self.pending_input_requests: Dict[str, Dict[str, Any]] = {}
         self.running = True
         self.output_queue = queue.Queue()
 
@@ -57,6 +60,7 @@ class KernelBridge:
 
             # Start iopub listener thread
             self._start_iopub_listener()
+            self._start_stdin_listener()
 
             # Get language from kernelspec
             language = None
@@ -90,6 +94,7 @@ class KernelBridge:
             self.kernel_client.wait_for_ready(timeout=30)
 
             self._start_iopub_listener()
+            self._start_stdin_listener()
 
             language = None
             try:
@@ -129,6 +134,35 @@ class KernelBridge:
         self.iopub_thread = threading.Thread(target=listener, daemon=True)
         self.iopub_thread.start()
 
+    def _start_stdin_listener(self):
+        """Start a thread to listen for stdin messages."""
+        def listener():
+            while self.running and self.kernel_client:
+                try:
+                    msg = self.kernel_client.get_stdin_msg(timeout=0.5)
+                    self._handle_stdin_message(msg)
+                except queue.Empty:
+                    continue
+                except Exception as e:
+                    if self.running:
+                        self.send_message({
+                            "type": "error",
+                            "error": f"Stdin listener error: {str(e)}"
+                        })
+
+        self.stdin_thread = threading.Thread(target=listener, daemon=True)
+        self.stdin_thread.start()
+
+    def _clear_input_requests_for_msg(self, msg_id: str):
+        """Remove pending stdin requests associated with an execution message."""
+        to_remove = [
+            request_id
+            for request_id, request in self.pending_input_requests.items()
+            if request.get("msg_id") == msg_id
+        ]
+        for request_id in to_remove:
+            self.pending_input_requests.pop(request_id, None)
+
     def _handle_iopub_message(self, msg: Dict[str, Any]):
         """Handle a message from the iopub channel."""
         msg_type = msg.get("msg_type", "")
@@ -150,6 +184,7 @@ class KernelBridge:
             if execution_state == "idle":
                 # Execution is complete, drop tracking to prevent unbounded growth.
                 self.pending_executions.pop(msg_id, None)
+                self._clear_input_requests_for_msg(msg_id)
 
         elif msg_type == "stream":
             self.send_message({
@@ -204,6 +239,32 @@ class KernelBridge:
                 "cell_id": cell_id,
                 "execution_count": content.get("execution_count")
             })
+
+    def _handle_stdin_message(self, msg: Dict[str, Any]):
+        """Handle a message from the stdin channel."""
+        if msg.get("msg_type") != "input_request":
+            return
+
+        content = msg.get("content", {})
+        parent_header = msg.get("parent_header", {})
+        parent_msg_id = parent_header.get("msg_id", "")
+
+        exec_info = self.pending_executions.get(parent_msg_id, {})
+        cell_id = exec_info.get("cell_id")
+
+        request_id = uuid.uuid4().hex
+        self.pending_input_requests[request_id] = {
+            "msg_id": parent_msg_id,
+            "cell_id": cell_id,
+        }
+
+        self.send_message({
+            "type": "input_request",
+            "request_id": request_id,
+            "cell_id": cell_id,
+            "prompt": content.get("prompt", ""),
+            "password": bool(content.get("password", False)),
+        })
 
     def execute(
         self,
@@ -285,6 +346,7 @@ class KernelBridge:
         if self.kernel_manager:
             try:
                 self.kernel_manager.interrupt_kernel()
+                self.pending_input_requests.clear()
                 self.send_message({"type": "interrupted"})
             except Exception as e:
                 self.send_message({
@@ -300,6 +362,7 @@ class KernelBridge:
                 self.kernel_client.wait_for_ready(timeout=30)
                 self.execution_count = 0
                 self.pending_executions.clear()
+                self.pending_input_requests.clear()
                 self.send_message({"type": "restarted"})
             except Exception as e:
                 self.send_message({
@@ -310,6 +373,7 @@ class KernelBridge:
     def shutdown(self):
         """Shutdown the kernel."""
         self.running = False
+        self.pending_input_requests.clear()
         if self.kernel_client:
             self.kernel_client.stop_channels()
         if self.kernel_manager:
@@ -318,6 +382,31 @@ class KernelBridge:
             except Exception:
                 pass
         self.send_message({"type": "shutdown"})
+
+    def input_reply(self, request_id: str, value: str):
+        """Send stdin reply for a pending input request."""
+        if not self.kernel_client:
+            self.send_message({
+                "type": "error",
+                "error": "No kernel connected"
+            })
+            return
+
+        if request_id not in self.pending_input_requests:
+            self.send_message({
+                "type": "error",
+                "error": f"Unknown input request_id: {request_id}"
+            })
+            return
+
+        try:
+            self.kernel_client.input(value)
+            self.pending_input_requests.pop(request_id, None)
+        except Exception as e:
+            self.send_message({
+                "type": "error",
+                "error": f"Failed to send input reply: {str(e)}"
+            })
 
     def get_kernel_info(self):
         """Get kernel information."""
@@ -508,6 +597,19 @@ def main():
                 detail_level = cmd.get("detail_level", 0)
                 request_id = cmd.get("request_id")
                 bridge.inspect(code, cursor_pos, detail_level, request_id)
+
+            elif action == "input_reply":
+                request_id = cmd.get("request_id")
+                value = cmd.get("value", "")
+                if not isinstance(request_id, str) or not request_id:
+                    bridge.send_message({
+                        "type": "error",
+                        "error": "Missing required request_id for input_reply action"
+                    })
+                    continue
+                if not isinstance(value, str):
+                    value = str(value)
+                bridge.input_reply(request_id, value)
 
             elif action == "ping":
                 bridge.send_message({"type": "pong"})

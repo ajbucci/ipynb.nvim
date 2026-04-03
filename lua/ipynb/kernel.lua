@@ -55,6 +55,28 @@ local function send_command(state, cmd)
   return true
 end
 
+---Send an input reply to the Python bridge.
+---@param state NotebookState
+---@param request_id string
+---@param value string
+---@return boolean success
+local function send_input_reply(state, request_id, value)
+  return send_command(state, {
+    action = "input_reply",
+    request_id = request_id,
+    value = value,
+  })
+end
+
+---Close any active notebook input prompt.
+---@param state NotebookState
+local function close_input_prompt(state)
+  local ok, input_mod = pcall(require, "ipynb.input")
+  if ok then
+    input_mod.close(state)
+  end
+end
+
 ---Update a cell field and re-render visuals
 ---@param state NotebookState
 ---@param cell_idx number
@@ -217,10 +239,33 @@ local function handle_message(state, msg)
       update_cell_field(state, target_idx, "execution_state", msg.state)
     end
     if msg.state == "idle" then
+      close_input_prompt(state)
       if msg.cell_id and type(msg.cell_id) == "string" then
         kernel.pending_cells[msg.cell_id] = nil
       end
     end
+
+  elseif msg_type == "input_request" then
+    if type(msg.request_id) ~= "string" or msg.request_id == "" then
+      vim.schedule(function()
+        vim.notify("Kernel input request missing request_id", vim.log.levels.ERROR)
+      end)
+      return
+    end
+
+    vim.schedule(function()
+      local input_mod = require("ipynb.input")
+      input_mod.request(
+        state,
+        msg,
+        function(value)
+          send_input_reply(state, msg.request_id, value or "")
+        end,
+        function()
+          send_command(state, { action = "interrupt" })
+        end
+      )
+    end)
 
   elseif msg_type == "execute_input" then
     local target_idx = resolve_message_cell(state, msg)
@@ -244,6 +289,7 @@ local function handle_message(state, msg)
   elseif msg_type == "interrupted" then
     kernel.execution_state = "idle"
     kernel.pending_cells = {}
+    close_input_prompt(state)
     vim.schedule(function()
       vim.notify("Kernel interrupted", vim.log.levels.INFO)
     end)
@@ -251,6 +297,7 @@ local function handle_message(state, msg)
   elseif msg_type == "restarted" then
     kernel.execution_state = "idle"
     kernel.pending_cells = {}
+    close_input_prompt(state)
     vim.schedule(function()
       vim.notify("Kernel restarted", vim.log.levels.INFO)
     end)
@@ -259,6 +306,7 @@ local function handle_message(state, msg)
     kernel.connected = false
     kernel.execution_state = "idle"
     kernel.pending_cells = {}
+    close_input_prompt(state)
 
   elseif msg_type == "error" then
     vim.schedule(function()
