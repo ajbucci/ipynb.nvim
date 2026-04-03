@@ -2,6 +2,14 @@
 
 local M = {}
 
+local function leave_insert_mode()
+  local mode = vim.api.nvim_get_mode().mode
+  local head = mode:sub(1, 1)
+  if head == "i" or head == "R" then
+    pcall(vim.cmd, "stopinsert")
+  end
+end
+
 ---@param prompt string|nil
 ---@return string
 local function normalize_prompt(prompt)
@@ -19,6 +27,8 @@ local function close_state_prompt(state)
   if not state or not state._input_state then
     return
   end
+
+  leave_insert_mode()
 
   local prompt_state = state._input_state
   state._input_state = nil
