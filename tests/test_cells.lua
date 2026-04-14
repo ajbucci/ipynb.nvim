@@ -222,6 +222,62 @@ h.run_test('edit_overlay_matches_wrapped_height', function()
 end)
 
 --------------------------------------------------------------------------------
+-- Test: Edit overlay width tracks parent window resizing
+-- Creating a split shrinks the parent notebook window.
+-- Expected: the overlay width updates instead of spilling into the neighbor.
+--------------------------------------------------------------------------------
+h.run_test('edit_overlay_resizes_with_parent_window', function()
+  h.open_notebook('mixed.ipynb')
+  h.enter_cell(1)
+
+  local state = h.get_state()
+  local facade_buf = state.facade_buf
+  local edit = state.edit_state
+  local initial_width = vim.api.nvim_win_get_config(edit.win).width
+
+  vim.api.nvim_set_current_win(edit.parent_win)
+  vim.cmd('vsplit')
+  vim.wait(50)
+
+  state = require('ipynb.state').get_by_facade(facade_buf)
+  edit = state.edit_state
+
+  local parent_width = vim.api.nvim_win_get_width(edit.parent_win)
+  local textoff = (vim.fn.getwininfo(edit.parent_win)[1] or {}).textoff or 0
+  local expected_width = math.max(parent_width - textoff, 1)
+  local edit_width = vim.api.nvim_win_get_config(edit.win).width
+
+  h.assert_true(parent_width < initial_width, 'Parent window should shrink after creating a split')
+  h.assert_eq(edit_width, expected_width,
+    string.format('Edit overlay width (%d) should match parent text width (%d)', edit_width, expected_width))
+end)
+
+--------------------------------------------------------------------------------
+-- Test: Edit overlay closes if the parent window switches to another buffer
+-- Opening another file in the same window should not leave the notebook cell visible.
+-- Expected: the edit float closes as soon as the parent window stops showing the facade.
+--------------------------------------------------------------------------------
+h.run_test('edit_overlay_closes_on_parent_buffer_switch', function()
+  h.open_notebook('mixed.ipynb')
+  h.enter_cell(1)
+
+  local state = h.get_state()
+  local facade_buf = state.facade_buf
+  local edit = state.edit_state
+
+  local foreign = vim.api.nvim_create_buf(true, true)
+  vim.api.nvim_buf_set_lines(foreign, 0, -1, false, { 'a,b,c', '1,2,3' })
+  vim.bo[foreign].filetype = 'csv'
+  vim.api.nvim_win_set_buf(edit.parent_win, foreign)
+  vim.wait(50)
+
+  state = require('ipynb.state').get_by_facade(facade_buf)
+  h.assert_true(state ~= nil, 'Notebook state should persist while the facade buffer is hidden')
+  h.assert_true(state.edit_state == nil, 'Edit state should close when the parent window switches away')
+  h.assert_false(vim.api.nvim_win_is_valid(edit.win), 'Edit float should close when the parent window switches away')
+end)
+
+--------------------------------------------------------------------------------
 -- Test: Cell count matches facade parsing
 -- Number of cells in state matches what jupytext_to_cells would return.
 --------------------------------------------------------------------------------

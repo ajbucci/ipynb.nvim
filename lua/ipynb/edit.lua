@@ -85,6 +85,8 @@ end
 -- Install wrapper when module loads
 install_changetracking_wrapper()
 
+local EDIT_ZINDEX = 40
+
 ---Match wrap-related display options so the overlay mirrors the facade.
 ---@param parent_win number
 ---@param win number
@@ -94,6 +96,40 @@ local function sync_edit_window_display_options(parent_win, win)
   vim.wo[win].breakindent = vim.wo[parent_win].breakindent
   vim.wo[win].breakindentopt = vim.wo[parent_win].breakindentopt
   vim.wo[win].showbreak = vim.wo[parent_win].showbreak
+end
+
+---@param parent_win number
+---@param win number
+---@param show_line_numbers boolean
+local function sync_edit_window_chrome(parent_win, win, show_line_numbers)
+  if show_line_numbers then
+    vim.wo[win].number = vim.wo[parent_win].number
+    vim.wo[win].relativenumber = vim.wo[parent_win].relativenumber
+    vim.wo[win].numberwidth = vim.wo[parent_win].numberwidth
+    vim.wo[win].signcolumn = vim.wo[parent_win].signcolumn
+  else
+    vim.wo[win].number = false
+    vim.wo[win].relativenumber = false
+    vim.wo[win].signcolumn = 'no'
+  end
+
+  sync_edit_window_display_options(parent_win, win)
+end
+
+---@param parent_win number
+---@param show_line_numbers boolean
+---@return number float_col
+---@return number float_width
+local function get_edit_window_geometry(parent_win, show_line_numbers)
+  local win_width = vim.api.nvim_win_get_width(parent_win)
+  local wininfo = vim.fn.getwininfo(parent_win)[1] or {}
+  local textoff = wininfo.textoff or 0
+
+  if show_line_numbers then
+    return -textoff, math.max(win_width, 1)
+  end
+
+  return 0, math.max(win_width - textoff, 1)
 end
 
 ---Compute the display height for the edit overlay.
@@ -133,6 +169,56 @@ local function update_edit_window_height(edit, line_count)
       vim.fn.winrestview(view)
     end)
   end
+end
+
+---@param edit_buf number
+---@return string
+local function edit_window_group_name(edit_buf)
+  return 'NotebookEditWindow_' .. edit_buf
+end
+
+---Realign the edit overlay to its parent window or close it if detached.
+---@param state NotebookState
+local function refresh_edit_window(state)
+  local edit = state.edit_state
+  if not edit then
+    return
+  end
+
+  if not vim.api.nvim_win_is_valid(edit.win) then
+    pcall(vim.api.nvim_del_augroup_by_name, edit_window_group_name(edit.buf))
+    state.edit_state = nil
+    return
+  end
+
+  if not state.facade_buf or not vim.api.nvim_buf_is_valid(state.facade_buf) then
+    M.close(state)
+    return
+  end
+
+  if not vim.api.nvim_win_is_valid(edit.parent_win) or vim.api.nvim_win_get_buf(edit.parent_win) ~= state.facade_buf then
+    M.close(state)
+    return
+  end
+
+  local config = require('ipynb.config').get()
+  local float_col, float_width = get_edit_window_geometry(edit.parent_win, config.float.show_line_numbers)
+  local line_count = vim.api.nvim_buf_is_valid(edit.buf) and vim.api.nvim_buf_line_count(edit.buf) or 1
+
+  sync_edit_window_chrome(edit.parent_win, edit.win, config.float.show_line_numbers)
+  vim.api.nvim_win_set_config(edit.win, {
+    relative = 'win',
+    win = edit.parent_win,
+    bufpos = { edit.start_line, 0 },
+    row = 0,
+    col = float_col,
+    width = float_width,
+    height = math.max(line_count, 1),
+    anchor = 'NW',
+    border = 'none',
+    zindex = EDIT_ZINDEX,
+  })
+  update_edit_window_height(edit, line_count)
 end
 
 ---Get or create edit buffer for a cell
@@ -327,25 +413,11 @@ function M.open(state, mode)
   -- Get or create edit buffer for this cell
   local buf = get_or_create_edit_buf(cell, lines)
 
-  -- Get window dimensions for precise overlay
-  local win_width = vim.api.nvim_win_get_width(parent_win)
-  local wininfo = vim.fn.getwininfo(parent_win)[1]
-  local textoff = wininfo.textoff -- sign column + line numbers + fold column
-
   -- Height matches the cell content exactly
   local height = math.max(#lines, 1)
 
-  -- Calculate position and width based on line number setting
-  local float_col, float_width
-  if config.float.show_line_numbers then
-    -- Cover entire window including gutter
-    float_col = -textoff
-    float_width = win_width
-  else
-    -- Cover just the text area
-    float_col = 0
-    float_width = win_width - textoff
-  end
+  -- Calculate position and width based on the parent window's current geometry
+  local float_col, float_width = get_edit_window_geometry(parent_win, config.float.show_line_numbers)
 
   -- Open float anchored to cell position in buffer
   local win = vim.api.nvim_open_win(buf, true, {
@@ -358,21 +430,11 @@ function M.open(state, mode)
     height = height,
     anchor = 'NW',
     border = 'none', -- No border for seamless overlay
-    zindex = 40,  -- Lower than default (50) so LSP floats appear on top
+    zindex = EDIT_ZINDEX,  -- Lower than default (50) so LSP floats appear on top
   })
 
   -- Copy window settings from parent to match appearance
-  if config.float.show_line_numbers then
-    vim.wo[win].number = vim.wo[parent_win].number
-    vim.wo[win].relativenumber = vim.wo[parent_win].relativenumber
-    vim.wo[win].numberwidth = vim.wo[parent_win].numberwidth
-    vim.wo[win].signcolumn = vim.wo[parent_win].signcolumn
-  else
-    vim.wo[win].number = false
-    vim.wo[win].relativenumber = false
-    vim.wo[win].signcolumn = 'no'
-  end
-  sync_edit_window_display_options(parent_win, win)
+  sync_edit_window_chrome(parent_win, win, config.float.show_line_numbers)
 
   -- Store edit state (track by cell_id for stability across undo)
   state.edit_state = {
@@ -385,7 +447,7 @@ function M.open(state, mode)
     end_line = content_end,
     last_changedtick = vim.api.nvim_buf_get_changedtick(buf),  -- Track for spurious TextChangedI detection
   }
-  update_edit_window_height(state.edit_state, #lines)
+  refresh_edit_window(state)
 
   -- Re-render visuals to show active border (must be after edit_state is set)
   local visuals = require('ipynb.visuals')
@@ -402,6 +464,7 @@ function M.open(state, mode)
 
   -- Setup cursor sync (uses augroup with clear=true, safe to call repeatedly)
   M.setup_cursor_sync(state)
+  M.setup_window_sync(state)
 
   -- Setup keymaps (once per buffer)
   if not vim.b[buf].notebook_keymaps_set then
@@ -510,7 +573,7 @@ function M.setup_sync(state, buf)
 
     -- Update edit state
     edit.end_line = edit.start_line + new_count - 1
-    update_edit_window_height(edit, new_count)
+    refresh_edit_window(state)
 
     -- Refresh markers and visuals if line count changed
     if line_count_changed then
@@ -568,7 +631,7 @@ function M.setup_sync(state, buf)
 
       -- Update end_line before any other operations
       edit.end_line = edit.start_line + new_count - 1
-      update_edit_window_height(edit, new_count)
+      refresh_edit_window(state)
 
       -- Update window height and markers if line count changed
       if line_count_changed then
@@ -677,6 +740,37 @@ function M.setup_cursor_sync(state)
       end)
     end,
   })
+end
+
+---Keep the edit float aligned with the parent notebook window.
+---@param state NotebookState
+function M.setup_window_sync(state)
+  local edit = state.edit_state
+  if not edit then return end
+
+  local edit_buf = edit.buf
+  local group = vim.api.nvim_create_augroup(edit_window_group_name(edit_buf), { clear = true })
+
+  local function refresh_or_close()
+    vim.schedule(function()
+      if not state.edit_state or state.edit_state.buf ~= edit_buf then
+        return
+      end
+      refresh_edit_window(state)
+    end)
+  end
+
+  vim.api.nvim_create_autocmd({ 'WinResized', 'WinEnter' }, {
+    group = group,
+    callback = refresh_or_close,
+  })
+
+  vim.api.nvim_create_autocmd('BufWinLeave', {
+    group = group,
+    buffer = state.facade_buf,
+    callback = refresh_or_close,
+  })
+
 end
 
 ---Setup keymaps for edit float
@@ -940,7 +1034,7 @@ local function global_undo_redo(state, cmd)
           state.edit_state.start_line = content_start
           state.edit_state.end_line = content_end
 
-          update_edit_window_height(state.edit_state, #lines)
+          refresh_edit_window(state)
         end
         break
       end
@@ -991,6 +1085,7 @@ function M.close(state)
 
   local edit = state.edit_state --[[@as EditState]]
   local cell = state.cells[edit.cell_idx]
+  local facade_valid = state.facade_buf and vim.api.nvim_buf_is_valid(state.facade_buf)
 
   -- Update cell content in state
   if cell and vim.api.nvim_buf_is_valid(edit.buf) then
@@ -1006,9 +1101,16 @@ function M.close(state)
   end
 
   -- Restore facade to non-modifiable
-  vim.bo[state.facade_buf].modifiable = false
+  if facade_valid then
+    vim.bo[state.facade_buf].modifiable = false
+  end
 
   state.edit_state = nil
+  pcall(vim.api.nvim_del_augroup_by_name, edit_window_group_name(edit.buf))
+
+  if not facade_valid then
+    return
+  end
 
   -- Refresh facade markers and visuals
   local cells_mod = require('ipynb.cells')
