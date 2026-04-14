@@ -194,6 +194,12 @@ end
 function M.remove(buf)
   local state = M.notebooks[buf]
   if state then
+    -- Cleanup any active kernel stdin prompt before the notebook state disappears.
+    local input_ok, input_mod = pcall(require, 'ipynb.input')
+    if input_ok then
+      input_mod.close(state)
+    end
+
     -- Cleanup images
     local ok, images_mod = pcall(require, 'ipynb.images')
     if ok then

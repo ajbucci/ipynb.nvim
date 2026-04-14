@@ -2,6 +2,18 @@
 -- Run with: nvim --headless -u tests/minimal_init.lua -l tests/test_modified.lua
 
 local h = require('tests.helpers')
+local input_mod = require('ipynb.input')
+local state_mod = require('ipynb.state')
+
+local function open_test_input_prompt(state)
+  input_mod.request(state, {
+    request_id = 'test-request',
+    prompt = 'Input: ',
+    password = false,
+  }, function() end, function() end)
+  vim.wait(20)
+  return state._input_state
+end
 
 print('')
 print(string.rep('=', 60))
@@ -252,6 +264,45 @@ h.run_test('reopen_reuses_hidden_edit_buffer', function()
   h.assert_eq(second_edit_buf, first_edit_buf, 'Should reuse the hidden edit buffer across reopen')
   h.assert_eq(second_name, first_name, 'Reused edit buffer should keep its original name')
   h.assert_false(second_name:find('#', 1, true) ~= nil, 'Reused edit buffer should not need a fallback suffix')
+end)
+
+--------------------------------------------------------------------------------
+-- Test: Kernel shutdown closes any active stdin prompt
+--------------------------------------------------------------------------------
+h.run_test('kernel_shutdown_closes_input_prompt', function()
+  local state = state_mod.create(vim.fn.tempname() .. '.ipynb')
+  state.kernel = {
+    job_id = nil,
+    connected = true,
+  }
+
+  local prompt_state = open_test_input_prompt(state)
+  h.assert_true(prompt_state ~= nil, 'Input prompt should be created')
+  h.assert_true(vim.api.nvim_win_is_valid(prompt_state.win), 'Input prompt window should be valid')
+
+  require('ipynb.kernel').shutdown(state)
+
+  h.assert_true(state._input_state == nil, 'Input prompt state should be cleared on shutdown')
+  h.assert_false(vim.api.nvim_win_is_valid(prompt_state.win), 'Input prompt window should close on shutdown')
+  h.assert_false(vim.api.nvim_buf_is_valid(prompt_state.buf), 'Input prompt buffer should be wiped on shutdown')
+end)
+
+--------------------------------------------------------------------------------
+-- Test: Notebook removal closes any active stdin prompt
+--------------------------------------------------------------------------------
+h.run_test('state_remove_closes_input_prompt', function()
+  local state = state_mod.create(vim.fn.tempname() .. '.ipynb')
+  state.facade_buf = vim.api.nvim_create_buf(false, true)
+  state_mod.register(state)
+  local prompt_state = open_test_input_prompt(state)
+  h.assert_true(prompt_state ~= nil, 'Input prompt should be created')
+  h.assert_true(vim.api.nvim_win_is_valid(prompt_state.win), 'Input prompt window should be valid')
+
+  require('ipynb.state').remove(state.facade_buf)
+
+  h.assert_true(state._input_state == nil, 'Input prompt state should be cleared on notebook removal')
+  h.assert_false(vim.api.nvim_win_is_valid(prompt_state.win), 'Input prompt window should close on notebook removal')
+  h.assert_false(vim.api.nvim_buf_is_valid(prompt_state.buf), 'Input prompt buffer should be wiped on notebook removal')
 end)
 
 --------------------------------------------------------------------------------

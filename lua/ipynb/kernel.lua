@@ -460,6 +460,7 @@ function M.start_bridge(state, python_path)
         state.kernel.connected = false
       end
       vim.schedule(function()
+        close_input_prompt(state)
         if code ~= 0 then
           vim.notify("Kernel bridge exited with code " .. code, vim.log.levels.WARN)
         end
@@ -646,6 +647,7 @@ end
 ---Interrupt kernel execution
 ---@param state NotebookState
 function M.interrupt(state)
+  close_input_prompt(state)
   if state.kernel and state.kernel.job_id then
     send_command(state, { action = "interrupt" })
   end
@@ -655,6 +657,7 @@ end
 ---@param state NotebookState
 ---@param clear_outputs boolean|nil Clear all outputs on restart
 function M.restart(state, clear_outputs)
+  close_input_prompt(state)
   if state.kernel and state.kernel.job_id then
     if clear_outputs then
       require("ipynb.output").clear_all_outputs(state)
@@ -670,6 +673,7 @@ end
 ---Shutdown kernel
 ---@param state NotebookState
 function M.shutdown(state)
+  close_input_prompt(state)
   if state.kernel and state.kernel.job_id then
     send_command(state, { action = "shutdown" })
     vim.fn.jobstop(state.kernel.job_id)
