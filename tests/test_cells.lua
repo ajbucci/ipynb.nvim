@@ -180,6 +180,48 @@ h.run_test('shadow_facade_line_sync', function()
 end)
 
 --------------------------------------------------------------------------------
+-- Test: Edit overlay height tracks wrapped display height
+-- With wrap enabled, a single logical line can occupy multiple screen rows.
+-- Expected: the edit float grows to fully cover the wrapped facade content.
+--------------------------------------------------------------------------------
+h.run_test('edit_overlay_matches_wrapped_height', function()
+  if not vim.api.nvim_win_text_height then
+    return
+  end
+
+  h.open_notebook('mixed.ipynb')
+  vim.wo[0].wrap = true
+
+  h.enter_cell(3)
+
+  local state = h.get_state()
+  local edit = state.edit_state
+  local long_line = table.concat({
+    'This is a very long markdown line that should wrap several times in the',
+    'facade window so the edit overlay has to account for rendered screen rows,',
+    'not just the underlying buffer line count.',
+  }, ' ')
+
+  vim.api.nvim_buf_set_lines(edit.buf, 0, -1, false, { long_line })
+  vim.api.nvim_exec_autocmds('TextChanged', { buffer = edit.buf })
+  vim.wait(50)
+
+  state = h.get_state()
+  edit = state.edit_state
+
+  local facade_height = vim.api.nvim_win_text_height(edit.parent_win, {
+    start_row = edit.start_line,
+    end_row = edit.end_line,
+  }).all
+  local edit_height = vim.api.nvim_win_get_height(edit.win)
+
+  h.assert_true(vim.wo[edit.win].wrap, 'Edit overlay should inherit wrap from the facade window')
+  h.assert_true(facade_height > 1, 'Fixture line should wrap to multiple screen rows')
+  h.assert_eq(edit_height, facade_height,
+    string.format('Edit overlay height (%d) should match wrapped facade height (%d)', edit_height, facade_height))
+end)
+
+--------------------------------------------------------------------------------
 -- Test: Cell count matches facade parsing
 -- Number of cells in state matches what jupytext_to_cells would return.
 --------------------------------------------------------------------------------

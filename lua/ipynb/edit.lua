@@ -85,6 +85,39 @@ end
 -- Install wrapper when module loads
 install_changetracking_wrapper()
 
+---Match wrap-related display options so the overlay mirrors the facade.
+---@param parent_win number
+---@param win number
+local function sync_edit_window_display_options(parent_win, win)
+  vim.wo[win].wrap = vim.wo[parent_win].wrap
+  vim.wo[win].linebreak = vim.wo[parent_win].linebreak
+  vim.wo[win].breakindent = vim.wo[parent_win].breakindent
+  vim.wo[win].breakindentopt = vim.wo[parent_win].breakindentopt
+  vim.wo[win].showbreak = vim.wo[parent_win].showbreak
+end
+
+---Compute the display height for the edit overlay.
+---When wrap is enabled, screen rows can exceed buffer line count.
+---@param edit table The edit_state table
+---@param line_count number Number of lines
+---@return number
+local function get_edit_window_height(edit, line_count)
+  local height = math.max(line_count, 1)
+  if not vim.api.nvim_win_is_valid(edit.win) or not vim.wo[edit.win].wrap then
+    return height
+  end
+
+  local ok, info = pcall(vim.api.nvim_win_text_height, edit.win, {
+    start_row = 0,
+    end_row = math.max(line_count - 1, 0),
+  })
+  if ok and info and info.all then
+    return math.max(info.all, 1)
+  end
+
+  return height
+end
+
 ---Update edit window height and reset view
 ---@param edit table The edit_state table
 ---@param line_count number Number of lines
@@ -92,7 +125,7 @@ local function update_edit_window_height(edit, line_count)
   if vim.api.nvim_win_is_valid(edit.win) then
     vim.api.nvim_win_call(edit.win, function()
       local view = vim.fn.winsaveview()
-      vim.api.nvim_win_set_height(edit.win, math.max(line_count, 1))
+      vim.api.nvim_win_set_height(edit.win, get_edit_window_height(edit, line_count))
       -- Edit floats are sized to full cell content, so keep viewport anchored
       -- to the first line. This avoids "o" from clipping the previous line
       -- when a 1-line float grows and Neovim had scrolled topline to 2.
@@ -339,6 +372,7 @@ function M.open(state, mode)
     vim.wo[win].relativenumber = false
     vim.wo[win].signcolumn = 'no'
   end
+  sync_edit_window_display_options(parent_win, win)
 
   -- Store edit state (track by cell_id for stability across undo)
   state.edit_state = {
@@ -351,6 +385,7 @@ function M.open(state, mode)
     end_line = content_end,
     last_changedtick = vim.api.nvim_buf_get_changedtick(buf),  -- Track for spurious TextChangedI detection
   }
+  update_edit_window_height(state.edit_state, #lines)
 
   -- Re-render visuals to show active border (must be after edit_state is set)
   local visuals = require('ipynb.visuals')
@@ -475,6 +510,7 @@ function M.setup_sync(state, buf)
 
     -- Update edit state
     edit.end_line = edit.start_line + new_count - 1
+    update_edit_window_height(edit, new_count)
 
     -- Refresh markers and visuals if line count changed
     if line_count_changed then
@@ -485,8 +521,6 @@ function M.setup_sync(state, buf)
       if images_mod.is_available() then
         images_mod.sync_positions(state)
       end
-
-      update_edit_window_height(edit, new_count)
     end
   end
 
@@ -534,10 +568,10 @@ function M.setup_sync(state, buf)
 
       -- Update end_line before any other operations
       edit.end_line = edit.start_line + new_count - 1
+      update_edit_window_height(edit, new_count)
 
       -- Update window height and markers if line count changed
       if line_count_changed then
-        update_edit_window_height(edit, new_count)
         require('ipynb.cells').place_markers(state)
       end
     end,
