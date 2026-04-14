@@ -248,6 +248,73 @@ h.run_test('roundtrip_preserves_cell_ids', function()
 end)
 
 --------------------------------------------------------------------------------
+-- Test: Duplicate cell IDs are repaired on read
+--------------------------------------------------------------------------------
+h.run_test('read_repairs_duplicate_cell_ids', function()
+  local temp_path = vim.fn.tempname() .. '.ipynb'
+  local raw = {
+    cells = {
+      {
+        id = 'dup-id',
+        cell_type = 'code',
+        execution_count = vim.NIL,
+        metadata = {},
+        outputs = {},
+        source = { 'x = 1' },
+      },
+      {
+        id = 'dup-id',
+        cell_type = 'code',
+        execution_count = vim.NIL,
+        metadata = {},
+        outputs = {},
+        source = { 'y = 2' },
+      },
+      {
+        cell_type = 'markdown',
+        metadata = {},
+        source = { 'note' },
+      },
+    },
+    metadata = {
+      kernelspec = {
+        display_name = 'Python 3',
+        language = 'python',
+        name = 'python3',
+      },
+      language_info = {
+        name = 'python',
+      },
+    },
+    nbformat = 4,
+    nbformat_minor = 5,
+  }
+
+  vim.fn.writefile(vim.split(vim.json.encode(raw), '\n'), temp_path)
+
+  local cells, _, cell_ids = io_mod.read_ipynb(temp_path)
+
+  h.assert_eq(cells[1].id, 'dup-id', 'First duplicate should keep its original ID')
+  h.assert_true(cells[2].id ~= nil and cells[2].id ~= 'dup-id',
+    'Later duplicate should be repaired to a new unique ID')
+  h.assert_true(cells[3].id ~= nil and cells[3].id ~= 'dup-id',
+    'Missing ID should be generated during read')
+  h.assert_true(cells[2].id ~= cells[3].id, 'Generated IDs should be unique')
+  h.assert_true(cell_ids['dup-id'] == true, 'Returned ID set should include preserved ID')
+  h.assert_true(cell_ids[cells[2].id] == true, 'Returned ID set should include repaired duplicate ID')
+  h.assert_true(cell_ids[cells[3].id] == true, 'Returned ID set should include generated missing ID')
+
+  io_mod.write_ipynb(temp_path, cells, { nbformat = 4, nbformat_minor = 5 })
+  local written = read_json(temp_path)
+  h.assert_eq(written.cells[1].id, 'dup-id', 'Preserved ID should be written back unchanged')
+  h.assert_true(written.cells[2].id ~= 'dup-id', 'Written notebook should not keep duplicate ID')
+  h.assert_true(written.cells[3].id ~= nil and written.cells[3].id ~= 'dup-id',
+    'Written notebook should include generated ID for missing cell')
+
+  vim.fn.delete(temp_path)
+end)
+
+--------------------------------------------------------------------------------
 -- Test: Cell metadata preservation
 --------------------------------------------------------------------------------
 h.run_test('roundtrip_preserves_cell_metadata', function()

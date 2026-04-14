@@ -42,7 +42,8 @@ function M.create_empty_notebook(kernel_name)
 end
 
 ---Parse a .ipynb JSON file into cells
----Auto-upgrades to nbformat 4.5 and ensures all cells have IDs (per JEP 62)
+---Auto-upgrades to nbformat 4.5 and ensures all loaded cells have unique IDs
+---(per JEP 62), repairing missing or duplicate IDs on read.
 ---@param path string Path to .ipynb file
 ---@return Cell[], table metadata, table<string, boolean> cell_ids
 function M.read_ipynb(path)
@@ -54,15 +55,9 @@ function M.read_ipynb(path)
     error('Failed to parse notebook JSON: ' .. tostring(notebook))
   end
 
-  -- First pass: collect existing cell IDs for collision avoidance
+  -- Assign IDs against a live "already used" set so malformed notebooks with
+  -- duplicate IDs are repaired during load. The first valid occurrence wins.
   local existing_ids = {}
-  for _, nb_cell in ipairs(notebook.cells or {}) do
-    if nb_cell.id then
-      existing_ids[nb_cell.id] = true
-    end
-  end
-
-  -- Second pass: build cells, generating IDs for those without
   local cells = {}
   for _, nb_cell in ipairs(notebook.cells or {}) do
     -- Source can be string or array of strings
@@ -72,12 +67,12 @@ function M.read_ipynb(path)
       source = table.concat(source, '')
     end
 
-    -- Preserve original cell ID, or generate new one avoiding collisions
+    -- Preserve the first valid cell ID, otherwise repair by generating a new one.
     local id = nb_cell.id
-    if not id then
+    if type(id) ~= 'string' or id == '' or existing_ids[id] then
       id = state_mod.generate_cell_id(existing_ids)
-      existing_ids[id] = true
     end
+    existing_ids[id] = true
 
     local cell = {
       id = id,
