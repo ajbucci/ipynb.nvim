@@ -12,7 +12,31 @@ print('Running LSP proxy tests')
 print(string.rep('=', 60))
 print('')
 
--- Helper: Wait for LSP to attach to shadow buffer
+local function preferred_lsp_name()
+  local server = vim.env.IPYNB_TEST_LSP_SERVER
+  if server and server ~= '' then
+    return server
+  end
+
+  local lsp_bin = vim.env.IPYNB_TEST_LSP_BIN
+  if not lsp_bin or lsp_bin == '' then
+    return nil
+  end
+
+  local bin = vim.fs.basename(lsp_bin)
+  if bin:match('basedpyright') then
+    return 'basedpyright'
+  end
+  if bin:match('pyright') then
+    return 'pyright'
+  end
+
+  return nil
+end
+
+-- Helper: Wait for the primary LSP to attach to shadow buffer.
+-- Ruff tends to attach first, but these tests exercise navigation features that
+-- require the type-checking server to be available as well.
 local function wait_for_lsp(timeout_ms)
   timeout_ms = timeout_ms or 10000
   local state = h.get_state()
@@ -20,8 +44,24 @@ local function wait_for_lsp(timeout_ms)
     return false
   end
 
+  local preferred = preferred_lsp_name()
   local attached = vim.wait(timeout_ms, function()
-    return #vim.lsp.get_clients({ bufnr = state.shadow_buf }) > 0
+    local clients = vim.lsp.get_clients({ bufnr = state.shadow_buf })
+    if #clients == 0 then
+      return false
+    end
+
+    if not preferred then
+      return true
+    end
+
+    for _, client in ipairs(clients) do
+      if client.name == preferred then
+        return true
+      end
+    end
+
+    return false
   end, 100)
 
   return attached

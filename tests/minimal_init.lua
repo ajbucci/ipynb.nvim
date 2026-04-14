@@ -69,12 +69,68 @@ vim.o.fillchars = 'eob: '
 vim.o.foldenable = true
 vim.o.foldmethod = 'manual'
 
+local function split_args(arg_string)
+  local args = {}
+  if arg_string and arg_string ~= '' then
+    for _, arg in ipairs(vim.split(arg_string, ' ', { trimempty = true })) do
+      table.insert(args, arg)
+    end
+  end
+  return args
+end
+
+local function maybe_wrap_stdio_cmd(name, cmd)
+  if vim.fn.has('win32') == 1 or not cmd or #cmd == 0 then
+    return cmd
+  end
+
+  -- Neovim 0.12 intermittently fails to keep Python LSP console-script entrypoints
+  -- alive in this test harness. Relaying stdio through a shell wrapper avoids that.
+  if name ~= 'basedpyright' and name ~= 'pyright' then
+    return cmd
+  end
+
+  local relay = tests_dir .. '/lsp_stdio_relay.sh'
+  if vim.fn.executable(relay) ~= 1 then
+    return cmd
+  end
+
+  local wrapped = { relay }
+  vim.list_extend(wrapped, cmd)
+  return wrapped
+end
+
+local use_native_lsp = vim.fn.has('nvim-0.11') == 1 and vim.lsp and vim.lsp.config and vim.lsp.enable
+
+local function setup_lsp_server(name, opts)
+  opts = vim.deepcopy(opts or {})
+  opts.cmd = maybe_wrap_stdio_cmd(name, opts.cmd)
+
+  if use_native_lsp then
+    vim.lsp.config(name, opts)
+    vim.lsp.enable(name)
+    return true
+  end
+
+  local has_lspconfig, lspconfig = pcall(require, 'lspconfig')
+  if not has_lspconfig or not lspconfig[name] then
+    return false
+  end
+
+  lspconfig[name].setup(opts)
+  return true
+end
+
 -- Load the plugin
-require('ipynb').setup()
+require('ipynb').setup({
+  shadow = {
+    location = 'workspace',
+    dir = 'ipynb.nvim',
+  },
+})
 
 -- Setup basedpyright LSP if available (for LSP tests)
-local has_lspconfig, lspconfig = pcall(require, 'lspconfig')
-if has_lspconfig then
+do
   local cmd = nil
   local lsp_bin = vim.env.IPYNB_TEST_LSP_BIN
   local lsp_args = vim.env.IPYNB_TEST_LSP_ARGS
@@ -84,49 +140,34 @@ if has_lspconfig then
     -- Explicit server selection (e.g., "gopls")
     if lsp_bin and lsp_bin ~= '' and vim.fn.executable(lsp_bin) == 1 then
       cmd = { lsp_bin }
-      -- gopls does not accept --stdio; ignore shared args
-      if lsp_server ~= 'gopls' and lsp_args and lsp_args ~= '' then
-        for _, arg in ipairs(vim.split(lsp_args, ' ', { trimempty = true })) do
-          table.insert(cmd, arg)
-        end
+      if lsp_server ~= 'gopls' then
+        vim.list_extend(cmd, split_args(lsp_args))
       end
+    elseif lsp_server == 'gopls' and vim.fn.executable('gopls') == 1 then
+      cmd = { 'gopls' }
     end
 
-    if lsp_server == 'gopls' and lspconfig.gopls then
-      if cmd then
-        lspconfig.gopls.setup({ cmd = cmd })
-      elseif vim.fn.executable('gopls') == 1 then
-        lspconfig.gopls.setup({ cmd = { 'gopls' } })
-      end
+    if lsp_server == 'gopls' and cmd then
+      setup_lsp_server('gopls', { cmd = cmd })
     end
   else
     -- Default: basedpyright/pyright
     if lsp_bin and lsp_bin ~= '' and vim.fn.executable(lsp_bin) == 1 then
       cmd = { lsp_bin }
-      if lsp_args and lsp_args ~= '' then
-        for _, arg in ipairs(vim.split(lsp_args, ' ', { trimempty = true })) do
-          table.insert(cmd, arg)
-        end
-      end
-      lspconfig.basedpyright.setup({ cmd = cmd })
-    else
-      if vim.fn.executable('basedpyright-langserver') == 1 then
-        lspconfig.basedpyright.setup({})
-      elseif vim.fn.executable('pyright-langserver') == 1 then
-        lspconfig.pyright.setup({})
-      end
+      vim.list_extend(cmd, split_args(lsp_args))
+      setup_lsp_server('basedpyright', { cmd = cmd })
+    elseif vim.fn.executable('basedpyright-langserver') == 1 then
+      setup_lsp_server('basedpyright', {})
+    elseif vim.fn.executable('pyright-langserver') == 1 then
+      setup_lsp_server('pyright', {})
     end
 
-    -- Optional ruff LSP for formatting (ruff binary)
+    -- Optional ruff LSP for formatting
     local venv_ruff = plugin_dir .. '/tests/.nvim-test/venv/bin/ruff'
     if vim.fn.executable(venv_ruff) == 1 then
-      if lspconfig.ruff then
-        lspconfig.ruff.setup({ cmd = { venv_ruff, 'server' } })
-      end
+      setup_lsp_server('ruff', { cmd = { venv_ruff, 'server' } })
     elseif vim.fn.executable('ruff') == 1 then
-      if lspconfig.ruff then
-        lspconfig.ruff.setup({ cmd = { 'ruff', 'server' } })
-      end
+      setup_lsp_server('ruff', { cmd = { 'ruff', 'server' } })
     end
   end
 end

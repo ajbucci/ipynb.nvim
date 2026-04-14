@@ -11,6 +11,10 @@ local uri_mod = require('ipynb.lsp.uri')
 -- Key: LSP method name, Value: array of handler functions
 local interceptors = {}
 
+local function preserve_shadow_handler_context(method)
+  return method == 'textDocument/diagnostic' or method == 'workspace/diagnostic'
+end
+
 ---Register an interceptor for a specific LSP method
 ---Handler signature: handler(ctx, method, params, orig_handler, client, req_bufnr) -> handled, req_id
 ---@param method string LSP method name (e.g., 'textDocument/formatting')
@@ -94,7 +98,7 @@ local function wrap_client(client, shadow_buf)
       if orig_handler then
         handler = function(err, result, hctx, config)
           result = uri_mod.rewrite_result_uris(result, state, method)
-          if hctx then
+          if hctx and not preserve_shadow_handler_context(method) then
             hctx = vim.deepcopy(hctx)
             hctx.bufnr = state.facade_buf
           end
@@ -207,7 +211,7 @@ function M.install()
       if orig_handler then
         handler = function(err, result, hctx, config)
           result = uri_mod.rewrite_result_uris(result, state, method)
-          if hctx then
+          if hctx and not preserve_shadow_handler_context(method) then
             hctx = vim.deepcopy(hctx)
             hctx.bufnr = state.facade_buf
           end
@@ -242,7 +246,7 @@ function M.install()
               resp.result = uri_mod.rewrite_result_uris(resp.result, state, method)
             end
           end
-          if hctx then
+          if hctx and not preserve_shadow_handler_context(method) then
             hctx = vim.deepcopy(hctx)
             hctx.bufnr = state.facade_buf
           end

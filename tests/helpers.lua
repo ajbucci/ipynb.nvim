@@ -47,25 +47,43 @@ end
 
 ---Close all notebook buffers and clear state
 function M.close_all_notebooks()
-	-- Close any edit floats first
 	local state_mod = require("ipynb.state")
-	for _, state in pairs(state_mod._states or {}) do
+	local facade_bufs = {}
+
+	-- Close any edit floats first and collect live notebook buffers for cleanup.
+	for facade_buf, state in pairs(state_mod.notebooks or {}) do
 		if state.edit_state and vim.api.nvim_win_is_valid(state.edit_state.win) then
 			pcall(vim.api.nvim_win_close, state.edit_state.win, true)
 		end
+		table.insert(facade_bufs, facade_buf)
 	end
 
-	-- Delete all buffers
+	-- Stop LSP clients before deleting buffers so async diagnostics don't target
+	-- buffers that were force-deleted by the test harness.
+	for _, client in ipairs(vim.lsp.get_clients()) do
+		pcall(client.stop, client, true)
+	end
+	vim.wait(500, function()
+		return #vim.lsp.get_clients() == 0
+	end, 20)
+
+	-- Delete notebook facade buffers first. Their BufUnload handlers will clean up
+	-- shadow buffers, temp files, images, and state entries.
+	for _, buf in ipairs(facade_bufs) do
+		if vim.api.nvim_buf_is_valid(buf) then
+			pcall(vim.api.nvim_buf_delete, buf, { force = true })
+		end
+	end
+
+	-- Delete any remaining scratch/preview buffers left behind by the test.
 	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
 		if vim.api.nvim_buf_is_valid(buf) then
 			pcall(vim.api.nvim_buf_delete, buf, { force = true })
 		end
 	end
 
-	-- Clear state module
-	if state_mod._states then
-		state_mod._states = {}
-	end
+	-- Clear any stale state if a test bypassed the normal BufUnload path.
+	state_mod.notebooks = {}
 
 	-- Clear cached facade buffer
 	M._facade_buf = nil
