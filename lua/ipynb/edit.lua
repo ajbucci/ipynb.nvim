@@ -118,14 +118,42 @@ local function replace_buf_lines(buf, lines)
   end
 end
 
----@param name string
+---@param path string|nil
+---@return string|nil
+local function normalize_source_path(path)
+  if not path or path == '' then
+    return nil
+  end
+  return vim.fn.fnamemodify(path, ':p')
+end
+
+---@param buf number
+---@param source_path string|nil
+---@param cell_id string|nil
+local function set_edit_buffer_identity(buf, source_path, cell_id)
+  vim.b[buf].ipynb_is_edit_buffer = true
+  vim.b[buf].ipynb_edit_source_path = normalize_source_path(source_path)
+  vim.b[buf].ipynb_edit_cell_id = cell_id
+end
+
+---@param source_path string|nil
+---@param cell_id string|nil
 ---@return number|nil
-local function find_buffer_by_name(name)
+local function find_reusable_edit_buf(source_path, cell_id)
+  local normalized = normalize_source_path(source_path)
+  if not normalized or not cell_id then
+    return nil
+  end
+
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf) == name then
+    if vim.api.nvim_buf_is_valid(buf)
+      and vim.b[buf].ipynb_is_edit_buffer
+      and vim.b[buf].ipynb_edit_source_path == normalized
+      and vim.b[buf].ipynb_edit_cell_id == cell_id then
       return buf
     end
   end
+
   return nil
 end
 
@@ -153,8 +181,8 @@ local function get_or_create_edit_buf(cell, lines)
   local notebook_name = state and state.source_path and vim.fn.fnamemodify(state.source_path, ':t') or 'notebook'
   local buffer_name = string.format('[%s:%s]', notebook_name, cell.id or 'cell')
 
-  -- Reuse hidden buffer with the same name (common after reload/reopen) to avoid E95.
-  local existing = find_buffer_by_name(buffer_name)
+  -- Reuse the hidden edit buffer from the same notebook/cell after reload/reopen.
+  local existing = find_reusable_edit_buf(state and state.source_path, cell.id)
   if existing and vim.api.nvim_buf_is_valid(existing) then
     M.register_edit_buffer(existing)
     vim.bo[existing].bufhidden = 'hide'
@@ -167,6 +195,7 @@ local function get_or_create_edit_buf(cell, lines)
     if table.concat(current, '\n') ~= table.concat(lines, '\n') then
       replace_buf_lines(existing, lines)
     end
+    set_edit_buffer_identity(existing, state and state.source_path, cell.id)
     cell.edit_buf = existing
     return existing
   end
@@ -200,6 +229,7 @@ local function get_or_create_edit_buf(cell, lines)
 
   -- Store the language for reference (used by our LSP wrappers)
   vim.b[buf].ipynb_edit_lang = lang
+  set_edit_buffer_identity(buf, state and state.source_path, cell.id)
 
   -- Setup BufWriteCmd to save the notebook when :w is used in edit buffer
   vim.api.nvim_create_autocmd('BufWriteCmd', {

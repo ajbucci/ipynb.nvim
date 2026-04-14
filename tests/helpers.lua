@@ -92,13 +92,22 @@ function M.close_all_notebooks()
 	vim.wait(10)
 end
 
----Open a notebook file
----@param path string Path to notebook (relative to tests/fixtures/)
-function M.open_notebook(path)
-	local tests_dir = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
-	local full_path = tests_dir .. "/fixtures/" .. path
+local function tests_dir()
+	return vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
+end
 
-	vim.cmd("edit " .. full_path)
+---Get full path to a notebook fixture
+---@param path string Path relative to tests/fixtures/
+---@return string
+function M.fixture_path(path)
+	return tests_dir() .. "/fixtures/" .. path
+end
+
+---Open a notebook file by full path
+---@param full_path string Absolute or relative notebook path
+---@return NotebookState
+function M.open_notebook_path(full_path)
+	vim.cmd("edit " .. vim.fn.fnameescape(full_path))
 	vim.wait(100) -- Allow plugin to fully initialize
 
 	local state = require("ipynb.state").get()
@@ -107,6 +116,13 @@ function M.open_notebook(path)
 	assert(#state.cells > 0, "Should have cells")
 
 	return state
+end
+
+---Open a notebook fixture
+---@param path string Path to notebook (relative to tests/fixtures/)
+---@return NotebookState
+function M.open_notebook(path)
+	return M.open_notebook_path(M.fixture_path(path))
 end
 
 -- Track facade buffer for state lookups

@@ -219,6 +219,42 @@ h.run_test('edit_name_collision_no_e95', function()
 end)
 
 --------------------------------------------------------------------------------
+-- Test: Reopen should reuse the same edit buffer for the same persisted cell id
+-- Save a temp notebook so cell ids are stable, then close/reopen in the same
+-- Neovim session. Expected: the hidden edit buffer is reused, not duplicated.
+--------------------------------------------------------------------------------
+h.run_test('reopen_reuses_hidden_edit_buffer', function()
+  local source_path = h.fixture_path('simple.ipynb')
+  local temp_path = vim.fn.tempname() .. '.ipynb'
+  local contents = vim.fn.readfile(source_path, 'b')
+  vim.fn.writefile(contents, temp_path, 'b')
+
+  local state = h.open_notebook_path(temp_path)
+  require('ipynb.io').save_notebook(state.facade_buf)
+  local first_cell_id = state.cells[1].id
+  h.assert_true(first_cell_id ~= nil, 'Cell 1 should get a persisted id after save')
+
+  h.enter_cell(1)
+  local first_edit_buf = h.get_edit_buf()
+  local first_name = vim.api.nvim_buf_get_name(first_edit_buf)
+  h.exit_cell()
+
+  vim.api.nvim_buf_delete(state.facade_buf, { force = true })
+  vim.wait(100)
+
+  local reopened = h.open_notebook_path(temp_path)
+  h.assert_eq(reopened.cells[1].id, first_cell_id, 'Cell id should remain stable after reopen')
+
+  h.enter_cell(1)
+  local second_edit_buf = h.get_edit_buf()
+  local second_name = vim.api.nvim_buf_get_name(second_edit_buf)
+
+  h.assert_eq(second_edit_buf, first_edit_buf, 'Should reuse the hidden edit buffer across reopen')
+  h.assert_eq(second_name, first_name, 'Reused edit buffer should keep its original name')
+  h.assert_false(second_name:find('#', 1, true) ~= nil, 'Reused edit buffer should not need a fallback suffix')
+end)
+
+--------------------------------------------------------------------------------
 -- Print summary and exit
 --------------------------------------------------------------------------------
 local success = h.summary()
