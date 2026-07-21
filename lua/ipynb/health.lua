@@ -108,27 +108,12 @@ local function check_optional()
     health.info('nvim-web-devicons not installed (optional, for language icons)')
   end
 
-  -- snacks.nvim for images
-  local snacks_ok, Snacks = pcall(require, 'snacks')
-  if snacks_ok then
-    local has_image = Snacks.image and Snacks.image.placement
-    if has_image then
-      -- Check terminal support
-      local terminal_supported = true
-      if Snacks.image.supports_terminal then
-        terminal_supported = Snacks.image.supports_terminal()
-      end
-
-      if terminal_supported then
-        health.ok('snacks.nvim image support available')
-      else
-        health.info('snacks.nvim installed but terminal does not support images (requires kitty graphics protocol)')
-      end
-    else
-      health.info('snacks.nvim installed but image module not available')
-    end
+  -- image.nvim for images
+  local image_ok, image_api = pcall(require, 'image')
+  if image_ok and image_api then
+    health.ok('image.nvim available')
   else
-    health.info('snacks.nvim not installed (optional, for inline images)')
+    health.info('image.nvim not installed (optional, for inline images)')
   end
 end
 

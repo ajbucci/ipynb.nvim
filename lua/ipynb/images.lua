@@ -1,33 +1,29 @@
--- ipynb/images.lua - Image output rendering using snacks.nvim
+-- ipynb/images.lua - Image output rendering using image.nvim
 -- Uses vendored placeholder generation for true text/image interleaving in virt_lines
 
 local M = {}
 
 --------------------------------------------------------------------------------
--- Type definitions for snacks.nvim (for LuaLS)
+-- Type definitions for image.nvim (for LuaLS)
 --------------------------------------------------------------------------------
 
----@class snacks.Image.Size
----@field width number
----@field height number
-
----@class snacks.Image.Info
----@field size snacks.Image.Size
-
----@class snacks.Image
----@field id number Image ID for terminal protocol
----@field info snacks.Image.Info|nil Image metadata (available after ready)
----@field ready fun(self: snacks.Image): boolean Check if image is ready
----@field failed fun(self: snacks.Image): boolean Check if image failed to load
+---@class ImageNvim
+---@field id string|number Image ID
+---@field internal_id number Image ID for terminal protocol
+---@field image_width number Pixel width
+---@field image_height number Pixel height
+---@field path string File path
+---@field render fun(self: ImageNvim, geometry?: table)
+---@field clear fun(self: ImageNvim, shallow?: boolean)
 
 --------------------------------------------------------------------------------
 
--- Namespace for our image extmarks (separate from snacks)
+-- Namespace for our image extmarks (separate from image.nvim)
 local ns = vim.api.nvim_create_namespace("ipynb_images")
 M.ns = ns
 
 --------------------------------------------------------------------------------
--- Vendored from snacks.nvim for placeholder generation
+-- Vendored from image placeholder generation for Kitty Graphics Protocol
 -- This allows us to generate image placeholder text for use in our own virt_lines
 --------------------------------------------------------------------------------
 
@@ -36,7 +32,7 @@ local PLACEHOLDER = vim.fn.nr2char(0x10EEEE)
 
 -- Diacritics used to encode row/column positions in placeholder cells
 -- stylua: ignore
-local diacritics = vim.split("0305,030D,030E,0310,0312,033D,033E,033F,0346,034A,034B,034C,0350,0351,0352,0357,035B,0363,0364,0365,0366,0367,0368,0369,036A,036B,036C,036D,036E,036F,0483,0484,0485,0486,0487,0592,0593,0594,0595,0597,0598,0599,059C,059D,059E,059F,05A0,05A1,05A8,05A9,05AB,05AC,05AF,05C4,0610,0611,0612,0613,0614,0615,0616,0617,0657,0658,0659,065A,065B,065D,065E,06D6,06D7,06D8,06D9,06DA,06DB,06DC,06DF,06E0,06E1,06E2,06E4,06E7,06E8,06EB,06EC,0730,0732,0733,0735,0736,073A,073D,073F,0740,0741,0743,0745,0747,0749,074A,07EB,07EC,07ED,07EE,07EF,07F0,07F1,07F3,0816,0817,0818,0819,081B,081C,081D,081E,081F,0820,0821,0822,0823,0825,0826,0827,0829,082A,082B,082C,082D,0951,0953,0954,0F82,0F83,0F86,0F87,135D,135E,135F,17DD,193A,1A17,1A75,1A76,1A77,1A78,1A79,1A7A,1A7B,1A7C,1B6B,1B6D,1B6E,1B6F,1B70,1B71,1B72,1B73,1CD0,1CD1,1CD2,1CDA,1CDB,1CE0,1DC0,1DC1,1DC3,1DC4,1DC5,1DC6,1DC7,1DC8,1DC9,1DCB,1DCC,1DD1,1DD2,1DD3,1DD4,1DD5,1DD6,1DD7,1DD8,1DD9,1DDA,1DDB,1DDC,1DDD,1DDE,1DDF,1DE0,1DE1,1DE2,1DE3,1DE4,1DE5,1DE6,1DFE,20D0,20D1,20D4,20D5,20D6,20D7,20DB,20DC,20E1,20E7,20E9,20F0,2CEF,2CF0,2CF1,2DE0,2DE1,2DE2,2DE3,2DE4,2DE5,2DE6,2DE7,2DE8,2DE9,2DEA,2DEB,2DEC,2DED,2DEE,2DEF,2DF0,2DF1,2DF2,2DF3,2DF4,2DF5,2DF6,2DF7,2DF8,2DF9,2DFA,2DFB,2DFC,2DFD,2DFE,2DFF,A66F,A67C,A67D,A6F0,A6F1,A8E0,A8E1,A8E2,A8E3,A8E4,A8E5,A8E6,A8E7,A8E8,A8E9,A8EA,A8EB,A8EC,A8ED,A8EE,A8EF,A8F0,A8F1,AAB0,AAB2,AAB3,AAB7,AAB8,AABE,AABF,AAC1,FE20,FE21,FE22,FE23,FE24,FE25,FE26,10A0F,10A38,1D185,1D186,1D187,1D188,1D189,1D1AA,1D1AB,1D1AC,1D1AD,1D242,1D243,1D244", ",")
+local diacritics = vim.split("0305,030D,030E,0310,0312,033D,033E,033F,0346,034A,034B,034C,0350,0351,0352,0357,035B,0363,0364,0365,0366,0367,0368,0369,036A,036B,036C,036D,036E,036F,0483,0484,0485,0486,0487,0592,0593,0594,0595,0597,0598,0599,059C,059D,059E,059F,05A0,05A1,05A8,05A9,05AB,05AC,05AF,05C4,0610,0611,0612,0613,0614,0615,0616,0617,0657,0658,0659,065A,065B,065D,065E,06D6,06D7,06D8,06D9,06DA,06DB,06DC,06DF,06E0,06E1,06E2,06E4,06E7,06E8,06EB,06EC,0730,0732,0733,0735,0736,073A,073D,073F,0740,0741,0743,0745,0747,0749,074A,07EB,07EC,07ED,07EE,07EF,07F0,07F1,07F3,0816,0817,0818,0819,081B,081C,081D,081E,081F,0820,0821,0822,0823,0825,0826,0827,0829,082A,082B,082C,082D,0951,0953,0954,0F82,0F83,0F86,0F87,135D,135E,135F,17DD,193A,1A17,1A75,1A76,1A77,1A78,1A79,1A7A,1A7B,1A7C,1B6B,1B6D,1B6E,1B6F,1B70,1B71,1B72,1B73,1CD0,1CD1,1CD2,1CDA,1CDB,1CE0,1DC0,1DC1,1DC3,1DC4,1DC5,1DC6,1DC7,1DC8,1DC9,1DCB,1DCC,1DD1,1DD2,1DD3,1DD4,1DD5,1DD6,1DD7,1DD8,1DD9,1DDA,1DDB,1DDC,1DDD,1DDE,1DDF,1DE0,1DE1,1DE2,1DE3,1DE4,1DE5,1DE6,1DFE,20D0,20D1,20D4,20D5,20D6,20D7,20DB,20DC,20E1,20E7,20E9,20F0,2CEF,2CF0,2CF1,2DE0,2DE1,2DE2,2DE3,2DE4,2DE5,2DE6,2DE7,2DE8,2DE9,2DEA,2DEB,2DEC,2DED,2DEE,2DEF,2DF0,2DF1,2DF2,2DF3,2DF4,2DF5,2DF6,2DF7,2DF8,2DF9,2DFA,2DFB,2DFC,2DFD,2DFF,A66F,A67C,A67D,A6F0,A6F1,A8E0,A8E1,A8E2,A8E3,A8E4,A8E5,A8E6,A8E7,A8E8,A8E9,A8EA,A8EB,A8EC,A8ED,A8EE,A8EF,A8F0,A8F1,AAB0,AAB2,AAB3,AAB7,AAB8,AABE,AABF,AAC1,FE20,FE21,FE22,FE23,FE24,FE25,FE26,10A0F,10A38,1D185,1D186,1D187,1D188,1D189,1D1AA,1D1AB,1D1AC,1D1AD,1D242,1D243,1D244", ",")
 
 -- Lazy-load diacritic characters
 ---@type table<number, string>
@@ -59,7 +55,7 @@ local function next_placement_id()
 end
 
 ---Generate placeholder grid lines for an image
----@param img_id number The snacks Image ID
+---@param img_id number The Image ID
 ---@param placement_id number The placement ID
 ---@param width number Width in terminal cells
 ---@param height number Height in terminal cells
@@ -117,8 +113,8 @@ local TEXT_MIME_TYPES = {
 	["image/svg+xml"] = true,
 }
 
--- Cache for snacks.nvim availability check
-local snacks_available = nil
+-- Cache for image.nvim availability check
+local image_available = nil
 
 ---Convert pixel dimensions to terminal cells
 ---@param width_px number|nil Width in pixels
@@ -130,11 +126,11 @@ local function pixels_to_cells(width_px, height_px)
 		return nil, nil
 	end
 
-	-- Get actual terminal cell dimensions from snacks
+	-- Get actual terminal cell dimensions from image.nvim if available
 	local cell_width, cell_height = 8, 16
-	local ok, Snacks = pcall(require, "snacks")
-	if ok and Snacks.image and Snacks.image.terminal then
-		local term_size = Snacks.image.terminal.size()
+	local ok, term = pcall(require, "image.utils.term")
+	if ok and term and term.get_size then
+		local term_size = term.get_size()
 		if term_size then
 			cell_width = term_size.cell_width or cell_width
 			cell_height = term_size.cell_height or cell_height
@@ -194,34 +190,61 @@ local function write_binary_file(path, data)
 	return ok_write ~= nil
 end
 
--- Storage for snacks Image objects (keep them alive for the terminal protocol)
-local image_cache = {} ---@type table<string, snacks.Image>
+-- Storage for image.nvim Image objects
+local image_cache = {} ---@type table<string, ImageNvim>
 
----Get or create a snacks Image object for a file path
+---Get or create an image.nvim Image object for a file path
 ---@param path string Path to image file
----@return snacks.Image|nil
+---@return ImageNvim|nil
 local function get_or_create_image(path)
 	if image_cache[path] then
 		return image_cache[path]
 	end
 
-	local ok, Snacks = pcall(require, "snacks")
-	if not ok then
+	local ok, image_api = pcall(require, "image")
+	if not ok or type(image_api.from_file) ~= "function" then
 		return nil
 	end
 
-	local img = Snacks.image.image.new(path)
-	if img then
+	local ok_from, img = pcall(image_api.from_file, path)
+	if ok_from and img then
 		image_cache[path] = img
+		return img
 	end
-	return img
+	return nil
+end
+
+---Send Kitty placement command to terminal
+---@param img_id number Terminal image ID
+---@param placement_id number Placement ID
+---@param width number Width in terminal cells
+---@param height number Height in terminal cells
+local function send_placement_request(img_id, placement_id, width, height)
+	local payload = string.format("\x1b_Ga=p,U=1,i=%d,p=%d,C=1,c=%d,r=%d\x1b\\", img_id, placement_id, width, height)
+	if vim.env.TMUX or vim.env.TMUX_PANE then
+		payload = "\x1bPtmux;\x1b" .. payload:gsub("\x1b", "\x1b\x1b") .. "\x1b\\"
+	end
+	io.stdout:write(payload)
+	io.stdout:flush()
+end
+
+---Send Kitty delete placement command to terminal
+---@param img_id number Terminal image ID
+---@param placement_id number Placement ID
+local function send_clear_placement_request(img_id, placement_id)
+	local payload = string.format("\x1b_Ga=d,d=i,i=%d,p=%d\x1b\\", img_id, placement_id)
+	if vim.env.TMUX or vim.env.TMUX_PANE then
+		payload = "\x1bPtmux;\x1b" .. payload:gsub("\x1b", "\x1b\x1b") .. "\x1b\\"
+	end
+	io.stdout:write(payload)
+	io.stdout:flush()
 end
 
 --------------------------------------------------------------------------------
 -- Public API
 --------------------------------------------------------------------------------
 
----Check if snacks.nvim image module is available
+---Check if image.nvim module is available
 ---@return boolean
 function M.is_available()
 	local config = require("ipynb.config").get()
@@ -229,36 +252,23 @@ function M.is_available()
 		return false
 	end
 
-	if snacks_available == true then
+	if image_available == true then
 		return true
 	end
 
-	local ok, Snacks = pcall(require, "snacks")
-	if not ok then
+	local ok, image_api = pcall(require, "image")
+	if not ok or not image_api then
 		return false
 	end
 
-	if not Snacks.image or not Snacks.image.placement then
-		return false
-	end
-
-	if Snacks.image.supports_terminal and not Snacks.image.supports_terminal() then
-		return false
-	end
-
-	snacks_available = true
+	image_available = true
 	return true
 end
 
 ---Check if terminal supports Unicode placeholders (required for virt_lines images)
 ---@return boolean
 function M.supports_placeholders()
-	if not M.is_available() then
-		return false
-	end
-	local Snacks = require("snacks")
-	local env = Snacks.image.terminal.env()
-	return env.placeholders == true
+	return M.is_available()
 end
 
 ---Check if output has any image data
@@ -308,7 +318,6 @@ function M.get_image_virt_lines(state, cell, output, image_index)
 		return nil, 0
 	end
 
-	local Snacks = require("snacks")
 	local cell_id = cell.id
 	if not cell_id then
 		return nil, 0
@@ -338,33 +347,25 @@ function M.get_image_virt_lines(state, cell, output, image_index)
 	end
 
 	-- File content may have changed between executions for the same cell/image index.
-	-- Drop cached object so snacks reloads fresh bytes from disk.
-	image_cache[path] = nil
+	-- Drop cached object so image.nvim reloads fresh bytes from disk.
+	if image_cache[path] then
+		pcall(image_cache[path].clear, image_cache[path])
+		image_cache[path] = nil
+	end
 
-	-- Get or create snacks Image (handles sending image data to terminal)
+	-- Get or create image.nvim Image object
 	local img = get_or_create_image(path)
 	if not img then
 		return nil, 0
 	end
 
-	-- Wait for image to be ready (it may need conversion)
-	local ready = vim.wait(500, function()
-		return img:ready() or img:failed()
-	end, 10)
-
-	if not ready or img:failed() then
+	-- Get dimensions from image.nvim Image
+	local native_width_px = img.image_width
+	local native_height_px = img.image_height
+	if not native_width_px or not native_height_px or native_width_px <= 0 or native_height_px <= 0 then
 		return nil, 0
 	end
 
-	-- Get dimensions from snacks' converted image
-	local native_width_px, native_height_px
-	if img.info and img.info.size then
-		native_width_px = img.info.size.width
-		native_height_px = img.info.size.height
-	end
-	if not native_width_px or not native_height_px then
-		return nil, 0
-	end
 	local native_width_cells, native_height_cells = pixels_to_cells(native_width_px, native_height_px)
 
 	-- Get config for size limits
@@ -415,22 +416,18 @@ function M.get_image_virt_lines(state, cell, output, image_index)
 	img_width = math.max(1, img_width)
 	img_height = math.max(1, img_height)
 
+	-- Transmit image data to terminal via image.nvim
+	pcall(img.render, img, { width = img_width, height = img_height })
+
 	-- Generate unique placement ID
 	local placement_id = next_placement_id()
+	local internal_id = img.internal_id or 1
 
 	-- Send placement command to terminal
-	Snacks.image.terminal.request({
-		a = "p",
-		U = 1,
-		i = img.id,
-		p = placement_id,
-		C = 1,
-		c = img_width,
-		r = img_height,
-	})
+	send_placement_request(internal_id, placement_id, img_width, img_height)
 
 	-- Generate placeholder grid lines
-	local placeholder_lines, hl_group = generate_placeholder_grid(img.id, placement_id, img_width, img_height)
+	local placeholder_lines, hl_group = generate_placeholder_grid(internal_id, placement_id, img_width, img_height)
 
 	-- Convert to virt_lines format
 	local virt_line_entries = {}
@@ -458,21 +455,17 @@ function M.clear_images(state, cell_id)
 		return
 	end
 
-	local ok, Snacks = pcall(require, "snacks")
-	if ok and Snacks.image and Snacks.image.terminal then
-		for _, entry in ipairs(state.images[cell_id]) do
-			if entry.path then
+	for _, entry in ipairs(state.images[cell_id]) do
+		if entry.path then
+			if image_cache[entry.path] then
+				pcall(image_cache[entry.path].clear, image_cache[entry.path])
 				image_cache[entry.path] = nil
-				pcall(vim.fn.delete, entry.path)
 			end
-			if entry.img and entry.placement_id then
-				pcall(Snacks.image.terminal.request, {
-					a = "d",
-					d = "i",
-					i = entry.img.id,
-					p = entry.placement_id,
-				})
-			end
+			pcall(vim.fn.delete, entry.path)
+		end
+		if entry.img and entry.placement_id then
+			local internal_id = entry.img.internal_id or 1
+			pcall(send_clear_placement_request, internal_id, entry.placement_id)
 		end
 	end
 
@@ -500,3 +493,4 @@ function M.sync_positions(state)
 end
 
 return M
+

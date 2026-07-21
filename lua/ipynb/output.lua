@@ -54,9 +54,9 @@ function M.render_output(output)
     local has_image = images_mod.get_image_data(output)
 
     if has_image then
-      -- Image will be rendered by snacks.nvim if available, skip text here to avoid extmark conflict
+      -- Image will be rendered by image.nvim if available, skip text here to avoid extmark conflict
       if not images_mod.is_available() then
-        table.insert(lines, { { '[Image output - install snacks.nvim to view]', 'Comment' } })
+        table.insert(lines, { { '[Image output - install image.nvim to view]', 'Comment' } })
       end
     else
       if output.data and output.data['text/plain'] then
@@ -81,14 +81,14 @@ function M.render_output(output)
     local has_image = images_mod.get_image_data(output)
 
     if has_image then
-      -- Image will be rendered inline if snacks.nvim available
+      -- Image will be rendered inline if image.nvim available
       if images_mod.is_available() then
         -- Show text/plain as caption above image (split by newlines)
         if output.data and output.data['text/plain'] then
           add_text_plain_lines(lines, output.data['text/plain'], nil, 'IpynbOutput')
         end
       else
-        table.insert(lines, { { '[Image output - install snacks.nvim to view]', 'Comment' } })
+        table.insert(lines, { { '[Image output - install image.nvim to view]', 'Comment' } })
       end
     else
       if output.data and output.data['text/plain'] then
@@ -128,7 +128,7 @@ function M.build_output_text(cell)
     elseif output.output_type == 'execute_result' then
       local has_image = images_mod.get_image_data(output)
       if has_image and not images_mod.is_available() then
-        table.insert(lines, '[Image output - install snacks.nvim to view]')
+        table.insert(lines, '[Image output - install image.nvim to view]')
       elseif output.data and output.data['text/plain'] then
         local text = to_string(output.data['text/plain'])
         for i, line in ipairs(vim.split(text, '\n', { plain = true })) do
@@ -171,7 +171,7 @@ function M.build_output_text(cell)
     elseif output.output_type == 'display_data' then
       local has_image = images_mod.get_image_data(output)
       if has_image and not images_mod.is_available() then
-        table.insert(lines, '[Image output - install snacks.nvim to view]')
+        table.insert(lines, '[Image output - install image.nvim to view]')
       elseif output.data and output.data['text/plain'] then
         local text = to_string(output.data['text/plain'])
         for _, line in ipairs(vim.split(text, '\n', { plain = true })) do

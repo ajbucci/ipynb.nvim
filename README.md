@@ -36,7 +36,7 @@ Under the hood, the notebook is rendered into a single buffer for display. Enter
 
 - [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) for LSP support (completion, diagnostics, etc.)
 - [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) for language icons in cell borders
-- [snacks.nvim](https://github.com/folke/snacks.nvim) for inline image rendering
+- [image.nvim](https://github.com/3rd/image.nvim) for inline image rendering
   - a terminal that fully supports the kitty graphics protocol (e.g., kitty, Ghostty)
   - ImageMagick required to display non-PNG image formats
 
@@ -53,7 +53,7 @@ Run `:checkhealth ipynb` to verify your setup.
     "nvim-treesitter/nvim-treesitter",
     "neovim/nvim-lspconfig",
     -- "nvim-tree/nvim-web-devicons", -- optional, for language icons
-    -- "folke/snacks.nvim", -- optional, for inline images
+    -- "3rd/image.nvim", -- optional, for inline images
   },
   opts = {},
 }
@@ -397,13 +397,13 @@ Press `<Esc>` / `<C-c>` to cancel (the plugin interrupts the kernel).
 
 **Images not showing**
 
-Requires snacks.nvim and a terminal which fully supports the kitty graphics protocol (kitty, Ghostty). For tmux, set `allow-passthrough=on`.
+Requires image.nvim and a terminal which fully supports the kitty graphics protocol (kitty, Ghostty). For tmux, set `allow-passthrough=on`.
 
 **`[Image failed to load]` even when terminal support is true**
 
-If `:lua print(require("snacks").image.supports_terminal())` returns `true` but images still fail:
+If `:lua print(require("image").is_enabled())` returns `true` but images still fail:
 
-- Run `:checkhealth snacks` (not just `:checkhealth ipynb`)
+- Run `:checkhealth image` (not just `:checkhealth ipynb`)
 - Ensure ImageMagick tools are installed (`magick`/`convert`) for non-PNG conversion
 
 ## 🗺️ Roadmap

@@ -130,7 +130,7 @@ lua/ipynb/
 ├── keymaps.lua        # Keymap definitions
 ├── kernel.lua         # Jupyter kernel connection (per-notebook state)
 ├── output.lua         # Cell output rendering
-├── images.lua         # Image output rendering (via snacks.nvim)
+├── images.lua         # Image output rendering (via image.nvim)
 ├── inspector.lua      # Variable inspector (Jupyter inspect protocol)
 ├── folding.lua        # Cell folding support
 ├── picker.lua         # Cell picker (vim.ui.select)
@@ -1291,9 +1291,9 @@ end
 
 ### 11. Image Rendering (`images.lua`)
 
-**Inline image rendering using snacks.nvim (optional dependency):**
+**Inline image rendering using image.nvim (optional dependency):**
 
-Images are rendered inline within cell outputs using the Kitty Graphics Protocol (supported by kitty, ghostty, wezterm). The implementation uses vendored placeholder generation from snacks.nvim to enable true text/image interleaving.
+Images are rendered inline within cell outputs using the Kitty Graphics Protocol (supported by kitty, ghostty, wezterm). The implementation uses vendored placeholder generation to enable true text/image interleaving.
 
 **Key design decisions:**
 
@@ -1303,9 +1303,9 @@ Images are rendered inline within cell outputs using the Kitty Graphics Protocol
 
 3. **Single extmark with all content**: All cell output (separator, text lines, image placeholder lines) is combined into a single extmark's `virt_lines` array. Order is guaranteed by array order.
 
-4. **Actual terminal cell dimensions**: Uses `Snacks.image.terminal.size()` to get real terminal cell dimensions for accurate pixel-to-cell conversion. This ensures the placeholder grid size matches what the terminal allocates.
+4. **Actual terminal cell dimensions**: Uses `image.utils.term.get_size()` to get real terminal cell dimensions for accurate pixel-to-cell conversion. This ensures the placeholder grid size matches what the terminal allocates.
 
-5. **Snacks dimensions as source of truth**: We use `img.info.size` from snacks' converted image for dimensions. For SVGs, ImageMagick converts at 192 DPI which may differ from declared pt values. Using snacks' dimensions ensures the placeholder grid matches the actual image pixels, preventing placement misalignment. Images are scaled down proportionally to fit the terminal width.
+5. **Image.nvim dimensions as source of truth**: We use `img.image_width` and `img.image_height` from image.nvim for dimensions. For SVGs, ImageMagick converts at 192 DPI which may differ from declared pt values. Using image.nvim's dimensions ensures the placeholder grid matches the actual image pixels, preventing placement misalignment. Images are scaled down proportionally to fit the terminal width.
 
 **How Kitty Graphics Protocol placeholders work:**
 
@@ -1344,18 +1344,14 @@ end
 -- Generate virt_lines entries for an image
 function M.get_image_virt_lines(state, cell, output, image_index)
   -- 1. Decode image data and write to cache file
-  -- 2. Create snacks Image object (handles loading/sending to terminal)
+  -- 2. Create image.nvim Image object
   -- 3. Send placement command via Kitty Graphics Protocol
   -- 4. Generate placeholder grid lines
   -- 5. Return as virt_lines entries for interleaving
 
-  local img = get_or_create_image(path)  -- snacks handles terminal protocol
+  local img = get_or_create_image(path)  -- image.nvim handles loading/conversion
 
-  Snacks.image.terminal.request({
-    a = 'p', U = 1,
-    i = img.id, p = placement_id,
-    c = img_width, r = img_height,
-  })
+  send_placement_request(internal_id, placement_id, img_width, img_height)
 
   local placeholder_lines, hl_group = generate_placeholder_grid(
     img.id, placement_id, img_width, img_height
@@ -1403,10 +1399,10 @@ cell.output_extmark = vim.api.nvim_buf_set_extmark(buf, ns, end_line, 0, {
 **Key features:**
 
 - True text/image interleaving (text1 → img1 → text2 → img2 works correctly)
-- Gracefully degrades to placeholder text if snacks.nvim not installed or terminal lacks placeholder support
+- Gracefully degrades to placeholder text if image.nvim not installed or terminal lacks placeholder support
 - Caches decoded images in `~/.cache/nvim/ipynb.nvim/`
 - Supports PNG, JPEG, GIF, WebP, BMP, TIFF, HEIC, AVIF, SVG, and PDF formats
-- SVG and PDF are converted to raster via ImageMagick (handled by snacks.nvim)
+- SVG and PDF are converted to raster via ImageMagick (handled by image.nvim)
 - Uses actual terminal cell dimensions for accurate sizing
 - Images persist through cell moves, insertions, deletions (via unique cell IDs)
 - Requires terminal with Kitty Graphics Protocol + Unicode placeholder support (kitty, ghostty)
@@ -1522,7 +1518,7 @@ def inspect(self, code: str, cursor_pos: int, detail_level: int = 0):
 
 - Parsers live in `python/inspect_parsers/` and return a normalized `InspectSections` dataclass.
 - `get_parser(language, kernel_name)` routes to a parser; fallback is raw.
-- Raw output sets `_raw=true` and `_clean` (ANSI-stripped) to support non-Snacks setups.
+- Raw output sets `_raw=true` and `_clean` (ANSI-stripped) to support non-image setups.
 
 **Identifier detection:**
 
@@ -1601,4 +1597,4 @@ require('ipynb').setup({
 **Optional:**
 
 - nvim-web-devicons (language icons in cell borders)
-- snacks.nvim (image rendering)
+- image.nvim (image rendering)

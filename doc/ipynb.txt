@@ -25,7 +25,7 @@ Features:
 - Blocking stdin prompts (`input()`), with secure fallback for password prompts
 - Variable inspector using Jupyter inspect protocol (with auto-hover)
 - Multi-language support (Python, Julia, R, etc.)
-- Inline image rendering (requires snacks.nvim)
+- Inline image rendering (requires image.nvim)
 - Cell folding to collapse cell content
 - Tree-sitter based syntax highlighting
 
@@ -239,7 +239,7 @@ KernelConfig                                                      *KernelConfig*
 ------------------------------------------------------------------------------
 ImageConfig                                                        *ImageConfig*
 
-    Requires snacks.nvim for inline image rendering in terminals that
+    Requires image.nvim for inline image rendering in terminals that
     support the kitty graphics protocol.
 
     Fields: ~
@@ -519,7 +519,7 @@ Kernel won't start ~
 
 Images not showing ~
 
-    Requires snacks.nvim and a terminal which fully supports the kitty graphics protocol
+    Requires image.nvim and a terminal which fully supports the kitty graphics protocol
     (kitty, Ghostty). For tmux, set `allow-passthrough=on`.
 
 ==============================================================================

@@ -21,7 +21,7 @@ Thanks for your interest in contributing!
 
 - Neovim 0.10+
   - `nvim-treesitter` for tree-sitter support
-  - `snacks.nvim` for image rendering and colorized inspect
+  - `image.nvim` for image rendering and colorized inspect
 - a language server (e.g. basedpyright/pyright, julials, r_language_server)
 - Python 3.x (for kernel bridge + tests that touch Python)
   - `jupyter_client`, `nbformat` (we recommend installing via `uv` and the project's `pyproject.toml`)

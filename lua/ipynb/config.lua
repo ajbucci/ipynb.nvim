@@ -92,7 +92,7 @@ local M = {}
 ---@field python_path string|nil Custom Python path for kernel bridge
 
 ---@class ImageConfig
----@field enabled boolean Enable image rendering (requires snacks.nvim)
+---@field enabled boolean Enable image rendering (requires image.nvim)
 ---@field cache_dir string Directory to cache decoded images
 ---@field max_width number|nil Maximum image width in terminal columns (nil = window width minus sign/number columns)
 ---@field max_height number|nil Maximum image height in terminal rows (nil = window height minus scrolloff minus 1)
