@@ -1,5 +1,7 @@
 -- ipynb/images.lua - Image output rendering using image.nvim
--- Uses vendored placeholder generation for true text/image interleaving in virt_lines
+-- Uses image.nvim for dimension reading and image object lifecycle,
+-- with direct Kitty Graphics Protocol commands for terminal transmission.
+-- Uses vendored placeholder generation for true text/image interleaving in virt_lines.
 
 local M = {}
 
@@ -8,12 +10,12 @@ local M = {}
 --------------------------------------------------------------------------------
 
 ---@class ImageNvim
----@field id string|number Image ID
----@field internal_id number Image ID for terminal protocol
+---@field id string Image string ID
+---@field internal_id number Image ID for terminal protocol (Kitty image ID)
 ---@field image_width number Pixel width
 ---@field image_height number Pixel height
 ---@field path string File path
----@field render fun(self: ImageNvim, geometry?: table)
+---@field source_format string|nil Original image format (png, jpeg, etc.)
 ---@field clear fun(self: ImageNvim, shallow?: boolean)
 
 --------------------------------------------------------------------------------
@@ -23,7 +25,7 @@ local ns = vim.api.nvim_create_namespace("ipynb_images")
 M.ns = ns
 
 --------------------------------------------------------------------------------
--- Vendored from image placeholder generation for Kitty Graphics Protocol
+-- Vendored Kitty Graphics Protocol placeholder generation
 -- This allows us to generate image placeholder text for use in our own virt_lines
 --------------------------------------------------------------------------------
 
@@ -55,7 +57,7 @@ local function next_placement_id()
 end
 
 ---Generate placeholder grid lines for an image
----@param img_id number The Image ID
+---@param img_id number The Kitty image ID
 ---@param placement_id number The placement ID
 ---@param width number Width in terminal cells
 ---@param height number Height in terminal cells
@@ -190,10 +192,115 @@ local function write_binary_file(path, data)
 	return ok_write ~= nil
 end
 
--- Storage for image.nvim Image objects
+--------------------------------------------------------------------------------
+-- Kitty Graphics Protocol helpers
+--------------------------------------------------------------------------------
+
+---Send a raw Kitty protocol escape sequence to the terminal (with tmux wrapping)
+---@param payload string Kitty graphics protocol payload (without outer escape wrapper)
+local function send_kitty_command(payload)
+	if vim.env.TMUX or vim.env.TMUX_PANE then
+		payload = "\x1bPtmux;\x1b" .. payload:gsub("\x1b", "\x1b\x1b") .. "\x1b\\"
+	end
+	io.stdout:write(payload)
+	io.stdout:flush()
+end
+
+---Transmit image file data to the terminal via Kitty direct (base64) method.
+---Reads the file, base64-encodes it, and sends in chunks.
+---@param img_id number Kitty image ID
+---@param file_path string Absolute path to image file on disk
+local function send_transmit_request(img_id, file_path)
+	local f = io.open(file_path, "rb")
+	if not f then
+		return
+	end
+	local data = f:read("*a")
+	f:close()
+	if not data or #data == 0 then
+		return
+	end
+
+	local b64 = vim.base64.encode(data)
+	local chunk_size = 4096
+	local total_chunks = math.ceil(#b64 / chunk_size)
+
+	for i = 1, total_chunks do
+		local start = (i - 1) * chunk_size + 1
+		local finish = math.min(i * chunk_size, #b64)
+		local chunk = b64:sub(start, finish)
+		local m = i < total_chunks and 1 or 0
+		local payload = string.format("\x1b_Ga=t,f=100,i=%d,t=d,m=%d,q=2;%s\x1b\\", img_id, m, chunk)
+		send_kitty_command(payload)
+	end
+end
+
+---Send Kitty placement command (display with Unicode placeholders)
+---@param img_id number Kitty image ID
+---@param placement_id number Placement ID
+---@param width number Width in terminal cells
+---@param height number Height in terminal cells
+local function send_placement_request(img_id, placement_id, width, height)
+	local payload = string.format(
+		"\x1b_Ga=p,U=1,i=%d,p=%d,C=1,c=%d,r=%d,q=2\x1b\\",
+		img_id,
+		placement_id,
+		width,
+		height
+	)
+	send_kitty_command(payload)
+end
+
+---Send Kitty delete placement command
+---@param img_id number Kitty image ID
+---@param placement_id number Placement ID
+local function send_clear_placement_request(img_id, placement_id)
+	local payload = string.format("\x1b_Ga=d,d=i,i=%d,p=%d\x1b\\", img_id, placement_id)
+	send_kitty_command(payload)
+end
+
+---Convert a non-PNG image file to PNG using ImageMagick (required by Kitty protocol)
+---@param path string Input file path
+---@return string|nil png_path Path to PNG file (same as input if already PNG, converted path otherwise)
+local function ensure_png(path)
+	-- Check if already PNG by reading magic bytes
+	local f = io.open(path, "rb")
+	if not f then
+		return nil
+	end
+	local header = f:read(8)
+	f:close()
+	if header and #header >= 4 and header:byte(1) == 0x89 and header:byte(2) == 0x50 and header:byte(3) == 0x4E
+		and header:byte(4) == 0x47
+	then
+		return path -- Already PNG
+	end
+
+	-- Convert to PNG via ImageMagick
+	local output_path = path .. ".png"
+	-- Try 'magick' (ImageMagick 7+) first, then 'convert' (ImageMagick 6)
+	for _, cmd_name in ipairs({ "magick", "convert" }) do
+		local cmd = string.format("%s '%s' '%s' 2>/dev/null", cmd_name, path, output_path)
+		os.execute(cmd)
+		-- Verify the output file was created
+		local check = io.open(output_path, "rb")
+		if check then
+			check:close()
+			return output_path
+		end
+	end
+	return nil
+end
+
+--------------------------------------------------------------------------------
+-- image.nvim Image object cache
+--------------------------------------------------------------------------------
+
+-- Storage for image.nvim Image objects (used for dimension reading and lifecycle)
 local image_cache = {} ---@type table<string, ImageNvim>
 
----Get or create an image.nvim Image object for a file path
+---Get or create an image.nvim Image object for a file path.
+---The Image provides pixel dimensions and a unique internal_id for Kitty protocol.
 ---@param path string Path to image file
 ---@return ImageNvim|nil
 local function get_or_create_image(path)
@@ -206,7 +313,9 @@ local function get_or_create_image(path)
 		return nil
 	end
 
-	local ok_from, img = pcall(image_api.from_file, path)
+	-- from_file reads dimensions via processor; requires setup() to have been called.
+	-- Pass id=path for deduplication so the same file reuses the existing Image.
+	local ok_from, img = pcall(image_api.from_file, path, { id = path })
 	if ok_from and img then
 		image_cache[path] = img
 		return img
@@ -214,37 +323,11 @@ local function get_or_create_image(path)
 	return nil
 end
 
----Send Kitty placement command to terminal
----@param img_id number Terminal image ID
----@param placement_id number Placement ID
----@param width number Width in terminal cells
----@param height number Height in terminal cells
-local function send_placement_request(img_id, placement_id, width, height)
-	local payload = string.format("\x1b_Ga=p,U=1,i=%d,p=%d,C=1,c=%d,r=%d\x1b\\", img_id, placement_id, width, height)
-	if vim.env.TMUX or vim.env.TMUX_PANE then
-		payload = "\x1bPtmux;\x1b" .. payload:gsub("\x1b", "\x1b\x1b") .. "\x1b\\"
-	end
-	io.stdout:write(payload)
-	io.stdout:flush()
-end
-
----Send Kitty delete placement command to terminal
----@param img_id number Terminal image ID
----@param placement_id number Placement ID
-local function send_clear_placement_request(img_id, placement_id)
-	local payload = string.format("\x1b_Ga=d,d=i,i=%d,p=%d\x1b\\", img_id, placement_id)
-	if vim.env.TMUX or vim.env.TMUX_PANE then
-		payload = "\x1bPtmux;\x1b" .. payload:gsub("\x1b", "\x1b\x1b") .. "\x1b\\"
-	end
-	io.stdout:write(payload)
-	io.stdout:flush()
-end
-
 --------------------------------------------------------------------------------
 -- Public API
 --------------------------------------------------------------------------------
 
----Check if image.nvim module is available
+---Check if image.nvim module is available and functional
 ---@return boolean
 function M.is_available()
 	local config = require("ipynb.config").get()
@@ -259,6 +342,15 @@ function M.is_available()
 	local ok, image_api = pcall(require, "image")
 	if not ok or not image_api then
 		return false
+	end
+
+	-- Verify image.nvim is actually set up by probing from_file.
+	-- from_file throws if setup() hasn't been called.
+	local probe_ok = pcall(image_api.from_file, "/dev/null")
+	if not probe_ok then
+		-- setup() hasn't been called; try to initialize with defaults.
+		-- Safe because the user's own setup() (if any) will re-initialize later.
+		pcall(image_api.setup, {})
 	end
 
 	image_available = true
@@ -347,13 +439,13 @@ function M.get_image_virt_lines(state, cell, output, image_index)
 	end
 
 	-- File content may have changed between executions for the same cell/image index.
-	-- Drop cached object so image.nvim reloads fresh bytes from disk.
+	-- Drop cached object so we reload fresh metadata from disk.
 	if image_cache[path] then
 		pcall(image_cache[path].clear, image_cache[path])
 		image_cache[path] = nil
 	end
 
-	-- Get or create image.nvim Image object
+	-- Get or create image.nvim Image object (for dimensions and Kitty image ID)
 	local img = get_or_create_image(path)
 	if not img then
 		return nil, 0
@@ -416,17 +508,23 @@ function M.get_image_virt_lines(state, cell, output, image_index)
 	img_width = math.max(1, img_width)
 	img_height = math.max(1, img_height)
 
-	-- Transmit image data to terminal via image.nvim
-	pcall(img.render, img, { width = img_width, height = img_height })
+	-- Ensure image is PNG for Kitty protocol (only f=100/PNG is standard)
+	local transmit_path = ensure_png(path)
+	if not transmit_path then
+		return nil, 0
+	end
 
-	-- Generate unique placement ID
-	local placement_id = next_placement_id()
+	-- Transmit image data to terminal via Kitty file reference.
+	-- NOTE: We do NOT call img:render() because that triggers image.nvim's own
+	-- display pipeline which sends a conflicting placement command.
 	local internal_id = img.internal_id or 1
+	send_transmit_request(internal_id, transmit_path)
 
-	-- Send placement command to terminal
+	-- Generate unique placement ID and send placement command
+	local placement_id = next_placement_id()
 	send_placement_request(internal_id, placement_id, img_width, img_height)
 
-	-- Generate placeholder grid lines
+	-- Generate placeholder grid lines (encodes image_id + placement_id in highlight)
 	local placeholder_lines, hl_group = generate_placeholder_grid(internal_id, placement_id, img_width, img_height)
 
 	-- Convert to virt_lines format
@@ -442,6 +540,7 @@ function M.get_image_virt_lines(state, cell, output, image_index)
 		img = img,
 		placement_id = placement_id,
 		path = path,
+		png_path = transmit_path ~= path and transmit_path or nil,
 	})
 
 	return virt_line_entries, img_height
@@ -456,16 +555,21 @@ function M.clear_images(state, cell_id)
 	end
 
 	for _, entry in ipairs(state.images[cell_id]) do
-		if entry.path then
-			if image_cache[entry.path] then
-				pcall(image_cache[entry.path].clear, image_cache[entry.path])
-				image_cache[entry.path] = nil
-			end
-			pcall(vim.fn.delete, entry.path)
+		-- Clear image.nvim Image from terminal and registry
+		if entry.img then
+			pcall(entry.img.clear, entry.img)
 		end
-		if entry.img and entry.placement_id then
-			local internal_id = entry.img.internal_id or 1
-			pcall(send_clear_placement_request, internal_id, entry.placement_id)
+		-- Remove from our local cache
+		if entry.path and image_cache[entry.path] then
+			image_cache[entry.path] = nil
+		end
+		-- Delete converted PNG if we created one
+		if entry.png_path then
+			pcall(vim.fn.delete, entry.png_path)
+		end
+		-- Delete the original cache file
+		if entry.path then
+			pcall(vim.fn.delete, entry.path)
 		end
 	end
 
@@ -493,4 +597,3 @@ function M.sync_positions(state)
 end
 
 return M
-

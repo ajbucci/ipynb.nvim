@@ -111,9 +111,26 @@ local function check_optional()
   -- image.nvim for images
   local image_ok, image_api = pcall(require, 'image')
   if image_ok and image_api then
-    health.ok('image.nvim available')
+    -- Verify setup() was called by probing from_file
+    local setup_ok = pcall(image_api.from_file, '/dev/null')
+    if setup_ok then
+      health.ok('image.nvim available and configured')
+    else
+      health.warn('image.nvim installed but setup() not called', {
+        'Add require("image").setup() to your config',
+        'Without setup(), inline images will not render',
+      })
+    end
   else
     health.info('image.nvim not installed (optional, for inline images)')
+  end
+
+  -- ImageMagick for non-PNG image format conversion
+  local magick_ok = vim.fn.executable('magick') == 1 or vim.fn.executable('convert') == 1
+  if magick_ok then
+    health.ok('ImageMagick found (for non-PNG image formats)')
+  else
+    health.info('ImageMagick not found (optional, needed for JPEG/SVG/PDF image conversion)')
   end
 end
 

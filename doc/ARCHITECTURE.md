@@ -1246,7 +1246,7 @@ function M.render_output(output)
 
   elseif output.output_type == 'display_data' then
     if output.data['image/png'] then
-      -- Image rendered inline via images.lua if snacks.nvim available
+      -- Image rendered inline via images.lua if image.nvim available
       -- Falls back to placeholder text if not
     else
       table.insert(lines, {{ output.data['text/plain'] or '[Display]', 'IpynbOutput' }})
@@ -1317,7 +1317,7 @@ The terminal renders images by replacing special Unicode placeholder characters 
 - Placement ID encoded in highlight group's `sp` color
 
 ```lua
--- Vendored from snacks.nvim - generates placeholder grid
+-- Vendored Kitty Graphics Protocol placeholder generation
 local function generate_placeholder_grid(img_id, placement_id, width, height)
   -- Create highlight group with IDs encoded in colors
   local hl_group = 'IpynbImage' .. placement_id
