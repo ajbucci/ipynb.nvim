@@ -237,7 +237,19 @@ h.run_test('edit_overlay_resizes_with_parent_window', function()
 
   vim.api.nvim_set_current_win(edit.parent_win)
   vim.cmd('vsplit')
-  vim.wait(50)
+
+  local resized = vim.wait(1000, function()
+    local current_state = require('ipynb.state').get_by_facade(facade_buf)
+    local current_edit = current_state and current_state.edit_state
+    if not current_edit or not vim.api.nvim_win_is_valid(current_edit.win) then
+      return false
+    end
+
+    local current_parent_width = vim.api.nvim_win_get_width(current_edit.parent_win)
+    local current_textoff = (vim.fn.getwininfo(current_edit.parent_win)[1] or {}).textoff or 0
+    local current_expected_width = math.max(current_parent_width - current_textoff, 1)
+    return vim.api.nvim_win_get_config(current_edit.win).width == current_expected_width
+  end, 10)
 
   state = require('ipynb.state').get_by_facade(facade_buf)
   edit = state.edit_state
@@ -248,6 +260,7 @@ h.run_test('edit_overlay_resizes_with_parent_window', function()
   local edit_width = vim.api.nvim_win_get_config(edit.win).width
 
   h.assert_true(parent_width < initial_width, 'Parent window should shrink after creating a split')
+  h.assert_true(resized, 'Edit overlay should eventually match the resized parent text width')
   h.assert_eq(edit_width, expected_width,
     string.format('Edit overlay width (%d) should match parent text width (%d)', edit_width, expected_width))
 end)

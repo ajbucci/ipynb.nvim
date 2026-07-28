@@ -765,6 +765,15 @@ function M.setup_window_sync(state)
     callback = refresh_or_close,
   })
 
+  -- Diagnostics can make an automatic sign column appear without resizing the
+  -- window. Refresh after they change so the overlay still matches the usable
+  -- text width.
+  vim.api.nvim_create_autocmd('DiagnosticChanged', {
+    group = group,
+    buffer = state.facade_buf,
+    callback = refresh_or_close,
+  })
+
   vim.api.nvim_create_autocmd('BufWinLeave', {
     group = group,
     buffer = state.facade_buf,
