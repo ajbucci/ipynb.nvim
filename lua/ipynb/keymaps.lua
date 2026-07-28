@@ -440,12 +440,17 @@ function M.execute_and_next(state)
 
   local cell_idx, cell = get_cell_at_cursor(state)
 
-  if cell and cell.type == 'code' then
+  if not cell_idx or not cell then
+    return
+  end
+
+  if cell.type == 'code' then
     kernel.execute(state, cell_idx)
-    -- Only move to next cell if we executed (and not at end)
-    if cell_idx < #state.cells then
-      cells_mod.goto_next_cell(state)
-    end
+  end
+
+  -- Advance for every cell type so Markdown/Raw cells do not block navigation.
+  if cell_idx < #state.cells then
+    cells_mod.goto_next_cell(state)
   end
 end
 

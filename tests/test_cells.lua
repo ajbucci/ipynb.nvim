@@ -291,6 +291,38 @@ h.run_test('edit_overlay_closes_on_parent_buffer_switch', function()
 end)
 
 --------------------------------------------------------------------------------
+-- Test: Execute-and-next advances through non-code cells
+-- Markdown and raw cells are not executable, but should not block navigation.
+--------------------------------------------------------------------------------
+h.run_test('execute_and_next_advances_through_non_code_cells', function()
+  h.open_notebook('mixed.ipynb')
+
+  local state = h.get_state()
+  local cells_mod = require('ipynb.cells')
+  local keymaps = require('ipynb.keymaps')
+
+  local function goto_cell(cell_idx)
+    local content_start = cells_mod.get_content_range(state, cell_idx)
+    vim.api.nvim_win_set_cursor(0, { content_start + 1, 0 })
+  end
+
+  local function current_cell_idx()
+    local cursor_line = vim.api.nvim_win_get_cursor(0)[1] - 1
+    return cells_mod.get_cell_at_line(state, cursor_line)
+  end
+
+  h.assert_eq(state.cells[1].type, 'markdown')
+  goto_cell(1)
+  keymaps.execute_and_next(state)
+  h.assert_eq(current_cell_idx(), 2, 'Execute-and-next should advance past Markdown cells')
+
+  state.cells[3].type = 'raw'
+  goto_cell(3)
+  keymaps.execute_and_next(state)
+  h.assert_eq(current_cell_idx(), 4, 'Execute-and-next should advance past Raw cells')
+end)
+
+--------------------------------------------------------------------------------
 -- Test: Cell count matches facade parsing
 -- Number of cells in state matches what jupytext_to_cells would return.
 --------------------------------------------------------------------------------
