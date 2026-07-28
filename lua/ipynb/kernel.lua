@@ -279,9 +279,9 @@ local function handle_message(state, msg)
       vim.schedule(function()
         local current_cell = state.cells and state.cells[target_idx] or nil
         if current_cell and target_cell.id == current_cell.id then
-          current_cell.outputs = current_cell.outputs or {}
-          table.insert(current_cell.outputs, msg.output)
-          require("ipynb.output").render_outputs(state, target_idx)
+          local output_mod = require("ipynb.output")
+          output_mod.append_output(current_cell, msg.output)
+          output_mod.render_outputs(state, target_idx)
         end
       end)
     end

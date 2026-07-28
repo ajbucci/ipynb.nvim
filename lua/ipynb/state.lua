@@ -4,6 +4,7 @@ local M = {}
 
 ---@class Output
 ---@field output_type "stream" | "execute_result" | "error" | "display_data"
+---@field name "stdout" | "stderr" | nil For stream output
 ---@field text string|nil For stream output
 ---@field data table|nil For execute_result/display_data
 ---@field ename string|nil For error
@@ -26,6 +27,7 @@ local M = {}
 ---@field top_border_extmark number|nil Top border underline extmark
 ---@field output_extmark number|nil Output virtual lines extmark
 ---@field edit_buf number|nil Persistent edit buffer for this cell
+---@field _stream_state { output_index: number, cursor: number }|nil Transient stream cursor state
 
 ---@class EditState
 ---@field buf number Float buffer

@@ -15,6 +15,86 @@ local function to_string(text)
   return text or ''
 end
 
+---Apply terminal-style stream controls to text.
+---The cursor is a Unicode codepoint offset so progress bars using block
+---characters overwrite one character at a time instead of one UTF-8 byte.
+---@param text string Existing normalized text
+---@param cursor number Current cursor offset (0-based)
+---@param new_text string Incoming stream text
+---@return string text Normalized text
+---@return number cursor Updated cursor offset
+local function process_stream_text(text, cursor, new_text)
+  local chars = vim.fn.str2list(text, true)
+  cursor = math.max(0, math.min(cursor, #chars))
+
+  for _, char in ipairs(vim.fn.str2list(new_text, true)) do
+    if char == 8 then -- \b: remove the character before the cursor
+      if cursor > 0 and chars[cursor] ~= 10 then
+        table.remove(chars, cursor)
+        cursor = cursor - 1
+      end
+    elseif char == 13 then -- \r: return to the beginning of the current line
+      while cursor > 0 and chars[cursor] ~= 10 do
+        cursor = cursor - 1
+      end
+    elseif char == 10 then -- \n: finish the current logical line
+      table.insert(chars, char)
+      cursor = #chars
+    else
+      cursor = cursor + 1
+      chars[cursor] = char
+    end
+  end
+
+  return vim.fn.list2str(chars, true), cursor
+end
+
+---Append an output to a cell, coalescing adjacent streams of the same kind.
+---Carriage returns update the current logical line, matching Jupyter frontend
+---behavior for progress bars and other terminal-style stream output.
+---@param cell Cell
+---@param output Output
+function M.append_output(cell, output)
+  cell.outputs = cell.outputs or {}
+
+  if output.output_type ~= 'stream' then
+    table.insert(cell.outputs, output)
+    cell._stream_state = nil
+    return
+  end
+
+  local previous = cell.outputs[#cell.outputs]
+  local can_coalesce = previous
+    and previous.output_type == 'stream'
+    and previous.name == output.name
+
+  if can_coalesce then
+    local stream_state = cell._stream_state
+    local cursor
+    if stream_state and stream_state.output_index == #cell.outputs then
+      cursor = stream_state.cursor
+    else
+      -- Recover sensibly for pre-existing output or transient state loss.
+      local normalized
+      normalized, cursor = process_stream_text('', 0, to_string(previous.text))
+      previous.text = normalized
+    end
+
+    previous.text, cursor = process_stream_text(
+      to_string(previous.text),
+      cursor,
+      to_string(output.text)
+    )
+    cell._stream_state = { output_index = #cell.outputs, cursor = cursor }
+    return
+  end
+
+  local cursor
+  output.text, cursor = process_stream_text('', 0, to_string(output.text))
+  table.insert(cell.outputs, output)
+  cell._stream_state = { output_index = #cell.outputs, cursor = cursor }
+end
+
 ---Helper to add text/plain data as virtual lines (handles string or table)
 ---@param lines table[] Virtual lines array to append to
 ---@param text_plain string|table The text/plain data
@@ -281,6 +361,7 @@ function M.clear_outputs(state, cell_idx)
   end
 
   cell.outputs = {}
+  cell._stream_state = nil
 end
 
 ---Clear all outputs
