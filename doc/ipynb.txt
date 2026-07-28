@@ -5,11 +5,12 @@ CONTENTS                                                       *ipynb-contents*
 
     1. Introduction ............................ |ipynb-introduction|
     2. Setup ................................... |ipynb-setup|
-    3. Configuration ........................... |ipynb-config|
-    4. Keymaps ................................. |ipynb-keymaps|
-    5. Commands ................................ |ipynb-commands|
-    6. Troubleshooting ......................... |ipynb-troubleshooting|
-    7. Statusline .............................. |ipynb-statusline|
+    3. Markdown Rendering ...................... |ipynb-markdown-rendering|
+    4. Configuration ........................... |ipynb-config|
+    5. Keymaps ................................. |ipynb-keymaps|
+    6. Commands ................................ |ipynb-commands|
+    7. Troubleshooting ......................... |ipynb-troubleshooting|
+    8. Statusline .............................. |ipynb-statusline|
 
 ==============================================================================
 INTRODUCTION                                               *ipynb-introduction*
@@ -77,6 +78,50 @@ require('ipynb').setup({opts})
 <
     Parameters: ~
         {opts}  (NotebookConfig|nil)  See |ipynb-config|
+
+==============================================================================
+MARKDOWN RENDERING                              *ipynb-markdown-rendering*
+
+Markdown cells are exposed as injected Markdown trees while the notebook
+facade keeps its `ipynb` filetype. Renderers that support Tree-sitter
+injections can display headings, links, lists, and LaTeX persistently in
+Notebook mode.
+
+render-markdown.nvim ~
+
+    Add `ipynb` to its filetype list: >lua
+        require('render-markdown').setup({
+            file_types = { 'markdown', 'ipynb' },
+            overrides = {
+                filetype = {
+                    ipynb = {
+                        -- Optional: keep the cursor line rendered.
+                        anti_conceal = { enabled = false },
+                    },
+                },
+            },
+        })
+<
+    The `file_types` entry is required. The `anti_conceal` override is optional
+    and keeps the cursor line rendered. If the plugin specification uses an
+    `ft` key, include both `markdown` and `ipynb` there as well. LaTeX rendering
+    requires the optional LaTeX parser and renderer dependencies documented by
+    render-markdown.nvim.
+
+markview.nvim ~
+
+    Add `ipynb` to `preview.filetypes` while retaining its defaults: >lua
+        require('markview').setup({
+            preview = {
+                filetypes = {
+                    'markdown', 'quarto', 'rmd', 'typst', 'asciidoc', 'ipynb',
+                },
+            },
+        })
+<
+    Do not change the notebook buffer's filetype to `markdown` or
+    `ipynb.markdown`. The `ipynb` filetype selects the parser that identifies
+    cell boundaries and provides the Markdown injections.
 
 ==============================================================================
 CONFIGURATION                                                    *ipynb-config*

@@ -105,6 +105,53 @@ The treesitter parser is automatically compiled on first load.
 - Place your cursor on a variable and inspect it using `:NotebookInspect` (default keymap: `<leader>kh`)
 - Inspect all variables in cell using `:NotebookInspectCell` (default keymap: `<leader>kv`)
 
+## 📝 Persistent Markdown Rendering
+
+Markdown cells receive Tree-sitter highlighting out of the box. To render
+headings, links, lists, tables, and LaTeX persistently in Notebook mode, use a
+Markdown renderer that supports injected Tree-sitter languages and configure it
+to attach to the `ipynb` filetype.
+
+For [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim)
+with lazy.nvim:
+
+```lua
+{
+  "MeanderingProgrammer/render-markdown.nvim",
+  ft = { "markdown", "ipynb" },
+  opts = {
+    overrides = {
+      filetype = {
+        ipynb = {
+          -- Optional: keep the cursor line rendered in the notebook facade.
+          anti_conceal = { enabled = false },
+        },
+      },
+    },
+  },
+}
+```
+
+If your plugin manager does not provide filetype configuration to
+render-markdown.nvim, set its attachment list explicitly:
+
+```lua
+require("render-markdown").setup({
+  file_types = { "markdown", "ipynb" },
+})
+```
+
+If a distribution already configures render-markdown.nvim, extend its existing
+plugin specification instead of calling `setup()` a second time. LaTeX
+rendering also requires render-markdown.nvim's optional LaTeX dependencies.
+
+For [markview.nvim](https://github.com/OXY2DEV/markview.nvim), add `ipynb` to
+`preview.filetypes` while retaining its defaults.
+
+The notebook buffer must remain `filetype=ipynb`. Changing it to `markdown` or
+`ipynb.markdown` disables the parser that identifies cell boundaries and
+provides the Markdown injections.
+
 ## 🐍 Python Environment *(for Jupyter kernels)*
 
 When starting a kernel, the plugin looks for Python in this order:
