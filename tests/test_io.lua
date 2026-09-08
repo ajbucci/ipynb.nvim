@@ -857,6 +857,33 @@ h.run_test('all_nbformat_fixtures_roundtrip', function()
 end)
 
 --------------------------------------------------------------------------------
+-- Test: Empty metadata serializes as a JSON object, not an array
+--------------------------------------------------------------------------------
+
+h.run_test('empty_metadata_serializes_as_object_not_array', function()
+  local cells = {
+    { id = 'cell1', source = 'x = 1', type = 'code', metadata = {}, outputs = {} },
+  }
+  local temp_path = vim.fn.tempname() .. '.ipynb'
+  io_mod.write_ipynb(temp_path, cells, { nbformat = 4, nbformat_minor = 5 })
+
+  local raw = table.concat(vim.fn.readfile(temp_path), '\n')
+  vim.fn.delete(temp_path)
+
+  -- Output is pretty-printed, so an empty object/array spans multiple lines,
+  -- e.g. `"metadata": {\n\n},` rather than `"metadata": {}` on one line.
+  h.assert_true(
+    raw:match('"metadata"%s*:%s*{%s*}') ~= nil,
+    'cell/notebook metadata with no entries should serialize as "metadata": {} (object), not []. Raw JSON: '
+      .. raw
+  )
+  h.assert_false(
+    raw:match('"metadata"%s*:%s*%[%s*%]') ~= nil,
+    'cell/notebook metadata must never serialize as "metadata": [] (array). Raw JSON: ' .. raw
+  )
+end)
+
+--------------------------------------------------------------------------------
 -- Print summary and exit
 --------------------------------------------------------------------------------
 local success = h.summary()
