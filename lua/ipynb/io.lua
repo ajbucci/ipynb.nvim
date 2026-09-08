@@ -4,6 +4,17 @@ local M = {}
 
 local state_mod = require('ipynb.state')
 
+---Force an empty table to encode as a JSON object ({}) rather than an array ([])
+---@param t table|nil
+---@return table
+local function ensure_dict(t)
+  t = t or {}
+  if next(t) == nil then
+    return vim.empty_dict()
+  end
+  return t
+end
+
 ---Create default metadata for a new notebook
 ---@param kernel_name string|nil Kernel name (default: "python3")
 ---@return table metadata
@@ -155,7 +166,7 @@ function M.write_ipynb(path, cells, metadata)
       id = id,
       cell_type = cell.type,
       source = source_lines,
-      metadata = cell.metadata or {},
+      metadata = ensure_dict(cell.metadata),
     }
 
     if cell.type == 'code' then
@@ -185,7 +196,7 @@ function M.write_ipynb(path, cells, metadata)
 
   local notebook = {
     cells = nb_cells,
-    metadata = nb_metadata,
+    metadata = ensure_dict(nb_metadata),
     nbformat = metadata and metadata.nbformat or default.nbformat,
     nbformat_minor = metadata and metadata.nbformat_minor or default.nbformat_minor,
   }
