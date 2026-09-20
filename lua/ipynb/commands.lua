@@ -80,6 +80,7 @@ function M.setup_buffer(state)
   local picker = require('ipynb.picker')
   local lsp = require('ipynb.lsp')
   local io_mod = require('ipynb.io')
+  local webui = require('ipynb.webui')
 
   -- Helper to get current cell index
   local function get_current_cell_idx()
@@ -322,6 +323,16 @@ function M.setup_buffer(state)
   vim.api.nvim_buf_create_user_command(buf, 'NotebookDebug', function()
     print('State:', vim.inspect(state))
   end, { desc = 'Debug notebook state' })
+
+  -- WebUI commands
+  vim.api.nvim_create_user_command('NotebookWebUIStart', function(opts)
+    local port = tonumber(opts.args)
+    webui.start(port)
+  end, { nargs = '?', desc = 'Start notebook webUI' })
+
+  vim.api.nvim_create_user_command('NotebookWebUIStop', function()
+    webui.stop()
+  end, { desc = 'Stop notebook webUI' })
 end
 
 ---Setup global commands (called once during plugin setup)

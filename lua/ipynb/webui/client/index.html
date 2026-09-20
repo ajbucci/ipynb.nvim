@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jupyter Preview</title>
+    <link href="style.css" rel="stylesheet" />
+    <!-- Markdown Parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Syntax Highlighter -->
+    <link href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-python.min.js"></script>
+</head>
+
+<body>
+    <div id="header">
+        <div id="filename">No notebook loaded</div>
+        <div>
+            <span id="status-dot"></span>
+            <span id="status-text">Disconnected</span>
+        </div>
+    </div>
+    <div id="container"></div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

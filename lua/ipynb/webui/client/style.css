@@ -1,0 +1,189 @@
+:root {
+  --bg-color: #ffffff;
+  --border-color: #e0e0e0;
+  --border-active-cell: #42a5f5;
+  --text-color: #333333;
+  --input-bg: #f5f5f5;
+  --status-disconnected: #e74c3c;
+  --status-kernel-offline: #f1c40f;
+  --status-kernel-ready: #2ecc71;
+  --prompt-color: #5c6bc0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-color: #1e1e1e;
+    --border-color: #333333;
+    --border-active-cell: #1e88e5;
+    --text-color: #d4d4d4;
+    --input-bg: #2d2d2d;
+  }
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#container {
+  width: 100%;
+  max-width: 900px;
+  padding: 40px 20px;
+}
+
+.cell {
+  border: 1px solid transparent;
+  border-left: 5px solid transparent;
+  margin-bottom: 15px;
+  padding: 5px 10px 5px 30px;
+  transition: border 0.2s;
+  position: relative;
+}
+
+.cell.active {
+  border: 1px solid var(--border-color);
+  border-left: 5px solid var(--border-active-cell);
+}
+
+.input-area {
+  display: flex;
+  background-color: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 5px;
+}
+
+.prompt {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--prompt-color);
+  user-select: none;
+  position: absolute;
+  top: 8px;
+  left: 0;
+  padding: 4px;
+  border-top-right-radius: 4px;
+}
+
+.source {
+  flex-grow: 1;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.source code {
+  font-family: "Fira Code", "Source Code Pro", monospace !important;
+  font-size: 14px !important;
+}
+
+.markdown-area {
+  padding: 10px;
+  line-height: 1.6;
+}
+
+.markdown-area h1,
+.markdown-area h2 {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.3em;
+}
+
+.output-area {
+  padding: 10px;
+  font-size: 14px;
+}
+
+.output-item {
+  margin-bottom: 5px;
+  white-space: pre-wrap;
+  font-family: monospace;
+}
+
+.output-error {
+  color: var(--status-disconnected);
+}
+
+#header {
+  position: sticky;
+  top: 0;
+  width: 100%;
+  background-color: var(--bg-color);
+  border-bottom: 1px solid var(--border-color);
+  padding: 10px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 100;
+  box-sizing: border-box;
+}
+
+#status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: var(--status-disconnected);
+  display: inline-block;
+  margin-right: 5px;
+}
+
+#status-dot.kernel-offline {
+  background-color: var(--status-kernel-offline);
+}
+
+#status-dot.kernel-ready {
+  background-color: var(--status-kernel-ready);
+}
+
+.execution-indicator {
+  display: none;
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  font-size: 12px;
+}
+
+.execution-indicator.running,
+.execution-indicator.completed {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.execution-indicator .icon {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+}
+
+.execution-indicator.running .icon {
+  border: 2px solid var(--border-color);
+  border-top-color: var(--prompt-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.execution-indicator.completed .icon {
+  color: var(--status-kernel-ready);
+}
+
+.execution-indicator .timer {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-color);
+}

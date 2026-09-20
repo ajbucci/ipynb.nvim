@@ -140,6 +140,24 @@ local function resolve_message_cell(state, msg)
   return nil, nil
 end
 
+---Notify the webUI of a kernel connection change, if it is running
+---@param state NotebookState
+---@param connected boolean
+local function notify_webui_kernel_status(state, connected)
+  local webui = require("ipynb.webui")
+  if not webui.is_running() then
+    return
+  end
+  local msg = {
+    type = "kernel_status",
+    connected = connected,
+  }
+  if connected then
+    msg.python_path = M.get_python_info(state.source_path)
+  end
+  webui.broadcast(vim.json.encode(msg))
+end
+
 ---Set the notebook language (updates metadata, treesitter, and LSP)
 ---@param state NotebookState
 ---@param lang string Language name (e.g., "python", "julia", "r")
@@ -223,6 +241,8 @@ local function handle_message(state, msg)
 
     vim.schedule(function()
       vim.notify("Kernel started: " .. msg.kernel_name, vim.log.levels.INFO)
+
+      notify_webui_kernel_status(state, true)
     end)
 
   elseif msg_type == "kernel_connected" then
@@ -230,6 +250,8 @@ local function handle_message(state, msg)
     kernel.execution_state = "idle"
     vim.schedule(function()
       vim.notify("Connected to kernel", vim.log.levels.INFO)
+
+      notify_webui_kernel_status(state, true)
     end)
 
   elseif msg_type == "status" then
@@ -242,6 +264,15 @@ local function handle_message(state, msg)
       close_input_prompt(state)
       if msg.cell_id and type(msg.cell_id) == "string" then
         kernel.pending_cells[msg.cell_id] = nil
+
+        -- Notify WebUI of execution completion
+        local webui = require("ipynb.webui")
+        if webui.is_running() then
+          webui.broadcast(vim.json.encode({
+            type = "execution_complete",
+            cell_id = msg.cell_id,
+          }))
+        end
       end
     end
 
@@ -271,6 +302,17 @@ local function handle_message(state, msg)
     local target_idx = resolve_message_cell(state, msg)
     if target_idx and msg.execution_count then
       update_cell_field(state, target_idx, "execution_count", msg.execution_count)
+
+      -- Forward execution count to the webUI so it can update the prompt
+      local webui = require("ipynb.webui")
+      if webui.is_running() then
+        local broadcast_msg = {
+          type = "execute_input",
+          cell_id = msg.cell_id,
+          execution_count = msg.execution_count,
+        }
+        webui.broadcast(vim.json.encode(broadcast_msg))
+      end
     end
 
   elseif msg_type == "output" then
@@ -282,6 +324,28 @@ local function handle_message(state, msg)
           local output_mod = require("ipynb.output")
           output_mod.append_output(current_cell, msg.output)
           output_mod.render_outputs(state, target_idx)
+        end
+
+        -- Forward notebook execution output messages to the webUI if it is active
+        local out_type = msg.output.output_type
+        if
+          out_type
+          and (
+            out_type == 'execute_result'
+            or out_type == 'display_data'
+            or out_type == 'stream'
+            or out_type == 'error'
+          )
+        then
+          local webui = require("ipynb.webui")
+          if webui.is_running() then
+            local broadcast_msg = {
+              type = out_type,
+              cell_id = msg.cell_id,
+              content = msg.output,
+            }
+            webui.broadcast(vim.json.encode(broadcast_msg))
+          end
         end
       end)
     end
@@ -307,6 +371,8 @@ local function handle_message(state, msg)
     kernel.execution_state = "idle"
     kernel.pending_cells = {}
     close_input_prompt(state)
+
+    notify_webui_kernel_status(state, false)
 
   elseif msg_type == "error" then
     vim.schedule(function()
@@ -469,6 +535,7 @@ function M.start_bridge(state, python_path)
         if code ~= 0 then
           vim.notify("Kernel bridge exited with code " .. code, vim.log.levels.WARN)
         end
+        notify_webui_kernel_status(state, false)
       end)
     end,
     stdout_buffered = false,
