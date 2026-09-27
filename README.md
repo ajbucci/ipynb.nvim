@@ -12,6 +12,7 @@ A modal Jupyter notebook editor for Neovim.
 - Edit `.ipynb` files as actual notebooks with isolated cell buffers
 - Cell outputs render inline as virtual lines (open in float to copy)
 - Inline image rendering (PNG, JPEG, SVG, etc.)
+- LaTeX outputs (SymPy, `IPython.display.Math`) rendered as images
 - Variable inspector with auto-hover (uses Jupyter inspect protocol)
 - Partial language server support (diagnostics, completion, go to definition, rename)
 - Multi-language support (Python, Julia, R, and more)
@@ -39,6 +40,7 @@ Under the hood, the notebook is rendered into a single buffer for display. Enter
 - [snacks.nvim](https://github.com/folke/snacks.nvim) for inline image rendering
   - a terminal that fully supports the kitty graphics protocol (e.g., kitty, Ghostty)
   - ImageMagick required to display non-PNG image formats
+- TeX Live and librsvg to render LaTeX as images (see [LaTeX Rendering](#-latex-rendering)); without them LaTeX shows as text
 
 Run `:checkhealth ipynb` to verify your setup.
 
@@ -151,6 +153,27 @@ For [markview.nvim](https://github.com/OXY2DEV/markview.nvim), add `ipynb` to
 The notebook buffer must remain `filetype=ipynb`. Changing it to `markdown` or
 `ipynb.markdown` disables the parser that identifies cell boundaries and
 provides the Markdown injections.
+
+## 🧮 LaTeX Rendering
+
+LaTeX outputs render as images through the same path as image outputs, so
+they need snacks.nvim and a kitty graphics terminal, plus:
+
+- `latex` and `dvisvgm`, with the LaTeX packages `amsmath`, `amsfonts`,
+  `mathtools` and `xcolor` (all part of TeX Live)
+- `rsvg-convert` (from librsvg)
+
+| Platform | Install |
+|---|---|
+| macOS | `brew install --cask mactex-no-gui && brew install librsvg` |
+| macOS (smaller) | `brew install --cask basictex && brew install librsvg`, then `sudo tlmgr install dvisvgm mathtools xcolor` |
+| Debian / Ubuntu | `sudo apt install texlive-latex-recommended dvisvgm librsvg2-bin` |
+| Fedora | `sudo dnf install texlive-scheme-basic texlive-amsmath texlive-mathtools texlive-xcolor texlive-dvisvgm librsvg2-tools` |
+| Arch | `sudo pacman -S texlive-latexrecommended dvisvgm librsvg` |
+
+`:checkhealth ipynb` reports missing programs, and ipynb.nvim warns once when
+it has LaTeX to render but cannot. To render LaTeX as text on purpose, set
+`latex = { enabled = false }`.
 
 ## 🐍 Python Environment *(for Jupyter kernels)*
 
@@ -274,6 +297,7 @@ require("ipynb").setup({
     border_active = "Number",     -- Cell border when in Cell mode
     exec_count = "Number",        -- Execution count [N]
     output = "Comment",           -- Output text
+    math = "IpynbOutput",         -- Rendered LaTeX outputs
     hint = "Comment",             -- Cell action keymap hints
     -- For statusline
     output_error = "DiagnosticError",
@@ -296,6 +320,10 @@ require("ipynb").setup({
     cache_dir = vim.fn.stdpath("cache") .. "/ipynb.nvim",
     max_width = nil,   -- nil = window width minus sign/number columns
     max_height = nil,  -- nil = window height minus scrolloff minus 1
+  },
+  latex = {
+    enabled = true,    -- Render LaTeX as images (needs latex, dvisvgm and rsvg-convert)
+    scale = 1.15,      -- Size of rendered math relative to the terminal font
   },
   inspector = {
     -- Keymaps while in cell variable inspector float window
@@ -453,6 +481,10 @@ If `:lua print(require("snacks").image.supports_terminal())` returns `true` but 
 - Run `:checkhealth snacks` (not just `:checkhealth ipynb`)
 - Ensure ImageMagick tools are installed (`magick`/`convert`) for non-PNG conversion
 
+**LaTeX shows as text**
+
+LaTeX outputs need `latex`, `dvisvgm` and `rsvg-convert` on your `PATH` (see [LaTeX Rendering](#-latex-rendering) and `:checkhealth ipynb`) as well as working image support. LaTeX that fails to compile keeps its source and shows the LaTeX error next to it. Rendered images are cached under `images.cache_dir`.
+
 ## 🗺️ Roadmap
 
 ✅ **Working:**
@@ -462,6 +494,7 @@ If `:lua print(require("snacks").image.supports_terminal())` returns `true` but 
 - [x] Kernel execution and output capture
 - [x] Blocking stdin input prompts (`input()` / `getpass`)
 - [x] Inline image rendering
+- [x] LaTeX output rendering (`text/latex`)
 - [x] Variable inspector (Jupyter inspect protocol, auto-hover)
 - [x] Partial LSP support (diagnostics, completion, hover, definition, references, rename, formatting, document symbols, signature help, document highlight, inlay hints)
 - [x] Multi-language support (Python, Julia, R, etc.)

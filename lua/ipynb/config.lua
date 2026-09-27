@@ -9,6 +9,7 @@ local M = {}
 ---@field border_hints BorderHintsConfig
 ---@field kernel KernelConfig
 ---@field images ImageConfig
+---@field latex LatexConfig
 ---@field inspector InspectorConfig
 ---@field folding FoldingConfig
 ---@field format FormatConfig
@@ -58,6 +59,10 @@ local M = {}
 ---@field cell_variables string Inspect all cell variables (default: '<leader>kv')
 ---@field toggle_auto_hover string Toggle inspect auto-hover (default: '<leader>kH')
 
+---@class LatexConfig
+---@field enabled boolean Render LaTeX as images (needs latex, dvisvgm and rsvg-convert) (default: true)
+---@field scale number Size of rendered math relative to the terminal font (default: 1.15)
+
 ---@class FoldingConfig
 ---@field hide_output boolean Include end marker in fold to hide output (default: false)
 
@@ -77,6 +82,7 @@ local M = {}
 ---@field exec_count string Execution count [N] (default: 'Number')
 ---@field output string Output text (default: 'Comment')
 ---@field output_error string Error output (default: 'DiagnosticError')
+---@field math string Rendered LaTeX in outputs (default: 'IpynbOutput')
 ---@field executing string Executing indicator (default: 'DiagnosticWarn')
 ---@field queued string Queued indicator (default: 'DiagnosticHint')
 ---@field hint string Action hints on active cell border (default: 'Comment')
@@ -161,6 +167,7 @@ M.defaults = {
 		exec_count = "Number",
 		output = "Comment",
 		output_error = "DiagnosticError",
+		math = "IpynbOutput",
 		executing = "DiagnosticWarn",
 		queued = "DiagnosticHint",
 		hint = "Comment",
@@ -180,6 +187,10 @@ M.defaults = {
 		cache_dir = vim.fn.stdpath("cache") .. "/ipynb.nvim",
 		max_width = nil, -- nil = window width minus sign/number columns
 		max_height = nil, -- nil = window height minus scrolloff minus 1
+	},
+	latex = {
+		enabled = true, -- Render LaTeX as images (needs latex, dvisvgm and rsvg-convert)
+		scale = 1.15, -- Size of rendered math relative to the terminal font
 	},
 	inspector = {
 		close = { "q", "<Esc>" }, -- Keys to close inspector window

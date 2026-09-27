@@ -307,6 +307,7 @@ function M.setup_highlights(hl_config)
   set_hl(0, 'IpynbExecCount', { link = hl_config.exec_count, default = true })
   set_hl(0, 'IpynbOutput', { link = hl_config.output, default = true })
   set_hl(0, 'IpynbOutputError', { link = hl_config.output_error, default = true })
+  set_hl(0, 'IpynbMath', { link = hl_config.math or 'IpynbOutput', default = true })
   set_hl(0, 'IpynbExecuting', { link = hl_config.executing, default = true })
   set_hl(0, 'IpynbQueued', { link = hl_config.queued, default = true })
 
