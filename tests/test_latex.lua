@@ -121,6 +121,69 @@ h.run_test('renders_png_and_reuses_it', function()
   h.assert_false(called, 'A cached source should not render again')
 end)
 
+h.run_test('inline_math_is_exactly_one_row_tall', function()
+  if not have_tools then
+    return
+  end
+  -- 16x32 cells round the fraction's offset slightly negative: rsvg-convert
+  -- must not mistake it for an option. The last two are taller than a line
+  -- of text, so they are shrunk to fit.
+  local cell_size = images.cell_size
+  images.cell_size = function()
+    return 16, 32
+  end
+  local ok, err = xpcall(function()
+    local sources = { '$E = mc^2$', '$\\bar{x} = \\frac{1}{n}\\sum x_i$', '$\\frac{\\sum_{i=1}^{n} x_i}{n}$' }
+    local pending = 0
+    for _, source in ipairs(sources) do
+      if not latex.lookup(source, function()
+        pending = pending - 1
+      end, { inline = true }) then
+        pending = pending + 1
+      end
+    end
+    assert(vim.wait(20000, function()
+      return pending == 0
+    end, 10), 'Renders should finish')
+    for _, source in ipairs(sources) do
+      local path, render_err = latex.lookup(source, function() end, { inline = true })
+      h.assert_true(path ~= nil, ('Inline math should render: %s (%s)'):format(source, tostring(render_err)))
+      local width, height = png_size(path)
+      h.assert_eq(height, 32, 'Inline math should be one row: ' .. source)
+      h.assert_eq(width % 16, 0, 'Inline math should be whole cells wide: ' .. source)
+    end
+    local plain = sources[1]
+    h.assert_true(latex.lookup(plain, function() end, { inline = true }) ~= render_all({ plain })[plain].path,
+      'Inline and display renders are cached apart')
+
+    -- A larger scale enlarges inline math too, and it stays one row tall.
+    -- (Math that fills its row, like x^2, is shrunk back to fit it.)
+    local function inline_size(source)
+      local rendered = false
+      if not latex.lookup(source, function()
+        rendered = true
+      end, { inline = true }) then
+        assert(vim.wait(20000, function()
+          return rendered
+        end, 10), 'Render should finish')
+      end
+      return png_size(latex.lookup(source, function() end, { inline = true }))
+    end
+    local scale = config.get().latex.scale
+    config.get().latex.scale = 1
+    local base_ok, base_width = pcall(inline_size, '$\\alpha + \\beta$')
+    config.get().latex.scale = 2
+    local scaled_ok, scaled_width, scaled_height = pcall(inline_size, '$\\alpha + \\beta$')
+    config.get().latex.scale = scale
+    assert(base_ok, base_width)
+    assert(scaled_ok, scaled_width)
+    h.assert_eq(scaled_height, 32, 'Scaled inline math should still be one row')
+    h.assert_true(scaled_width > base_width, 'Scale should enlarge inline math')
+  end, debug.traceback)
+  images.cell_size = cell_size
+  assert(ok, err)
+end)
+
 h.run_test('display_environments_render_inside_math_delimiters', function()
   if not have_tools then
     return
