@@ -18,6 +18,14 @@ local PREAMBLE = [[
 \setlength{\parindent}{0pt}
 \begin{document}]]
 
+-- Inline math: preview crops each page to its strut, one terminal row tall
+local INLINE_PREAMBLE = [[
+\documentclass{article}
+\usepackage{amsmath,amssymb,mathtools,xcolor}
+\usepackage[active,tightpage]{preview}
+\setlength\PreviewBorder{0pt}
+\begin{document}]]
+
 -- rsvg-convert processes running at once per batch
 local MAX_RASTERIZERS = 8
 
@@ -112,10 +120,11 @@ end
 ---@return number dpi
 ---@return number cell_width Pixels
 ---@return number cell_height Pixels
+---@return number scale latex.scale
 local function geometry()
   local cell_width, cell_height = require('ipynb.images').cell_size()
   local scale = (require('ipynb.config').get().latex or {}).scale or 1
-  return cell_height * 72.27 / 12 * scale, cell_width, cell_height
+  return cell_height * 72.27 / 12 * scale, cell_width, cell_height, scale
 end
 
 ---@return string
@@ -212,16 +221,25 @@ local function rasterize(item, svg, on_done)
   end
 
   -- rsvg-convert reads SVG pt as 1/72 inch
-  local width, height = width_pt * item.dpi / 72, height_pt * item.dpi / 72
+  local resolution = item.dpi
+  local height = height_pt * resolution / 72
+  if item.inline and height > item.cell_height + 0.5 then
+    -- Shrink to one row here rather than let kitty rescale it
+    resolution = resolution * item.cell_height / height
+    height = item.cell_height
+  end
+  local width = width_pt * resolution / 72
   local canvas_width = math.max(1, math.ceil(width / item.cell_width - 1e-6)) * item.cell_width
-  local canvas_height = math.max(1, math.ceil(height / item.cell_height - 1e-6)) * item.cell_height
-  local dpi = ('%.3f'):format(item.dpi)
+  local left = item.inline and (canvas_width - width) / 2 or 0
+  local canvas_height = item.inline and item.cell_height
+    or math.max(1, math.ceil(height / item.cell_height - 1e-6)) * item.cell_height
+  local dpi = ('%.3f'):format(resolution)
   local png = svg:gsub('%.svg$', '.png')
   -- '--opt=value', so a negative offset is not read as an option
   run({
     'rsvg-convert', '--dpi-x=' .. dpi, '--dpi-y=' .. dpi,
     ('--page-width=%dpx'):format(canvas_width), ('--page-height=%dpx'):format(canvas_height),
-    ('--top=%.3fpx'):format((canvas_height - height) / 2),
+    ('--left=%.3fpx'):format(left), ('--top=%.3fpx'):format((canvas_height - height) / 2),
     '-o', png, svg,
   }, vim.fs.dirname(svg), function(ok)
     ok = ok and vim.uv.fs_rename(png, item.path) ~= nil
@@ -266,13 +284,23 @@ local function render(items, on_done)
   vim.fn.mkdir(dir, 'p')
 
   -- Remember the doc.tex lines of each formula to blame errors on it
-  local lines = vim.split(PREAMBLE, '\n')
-  table.insert(lines, ('\\color[HTML]{%s}'):format(items[1].fg))
+  local color = ('\\color[HTML]{%s}'):format(items[1].fg)
+  local lines = vim.split(items[1].inline and INLINE_PREAMBLE or PREAMBLE, '\n')
+  if not items[1].inline then
+    table.insert(lines, color)
+  end
   local ranges = {}
   for i, item in ipairs(items) do
     local body = vim.split(item.source, '\n')
-    body[1] = '\\begingroup ' .. body[1]
-    body[#body] = body[#body] .. '\\endgroup\\clearpage'
+    if item.inline then
+      -- The strut shrinks with the scale to stay one row tall
+      local strut = ('\\rule[-%.4fpt]{0pt}{%.4fpt}'):format(3.6 / item.scale, 12 / item.scale)
+      body[1] = '\\begin{preview}' .. color .. strut .. ' ' .. body[1]
+      body[#body] = body[#body] .. '\\end{preview}'
+    else
+      body[1] = '\\begingroup ' .. body[1]
+      body[#body] = body[#body] .. '\\endgroup\\clearpage'
+    end
     ranges[i] = { #lines + 1, #lines + #body }
     vim.list_extend(lines, body)
   end
@@ -322,7 +350,9 @@ local function render(items, on_done)
       end
       return render(rest, on_done)
     end
-    run({ 'dvisvgm', '--verbosity=1', '--no-fonts', '--exact-bbox', '-p1-', '-o', 'page-%p.svg', 'doc.dvi' }, dir, function(svg_ok)
+    -- Display math is cropped to its ink; inline math keeps its strut box.
+    local bbox = items[1].inline and '--bbox=preview' or '--exact-bbox'
+    run({ 'dvisvgm', '--verbosity=1', '--no-fonts', bbox, '-p1-', '-o', 'page-%p.svg', 'doc.dvi' }, dir, function(svg_ok)
       if not svg_ok then
         return fail('dvisvgm failed')
       end
@@ -364,12 +394,13 @@ local function render(items, on_done)
   end)
 end
 
----Render everything queued since the last flush, one batch per color and geometry
+---Render everything queued since the last flush, one batch per color,
+---geometry and kind (display or inline)
 local function flush()
   flush_scheduled = false
   local batches = {}
   for _, item in ipairs(queue) do
-    local id = table.concat({ item.fg, item.dpi, item.cell_width, item.cell_height }, ':')
+    local id = table.concat({ item.fg, item.dpi, item.cell_width, item.cell_height, tostring(item.inline) }, ':')
     batches[id] = batches[id] or {}
     table.insert(batches[id], item)
   end
@@ -383,13 +414,22 @@ end
 ---Sources requested in the same tick are rendered together.
 ---@param source string LaTeX source, as found in a text/latex output
 ---@param on_ready fun() Called when a render started for this source finishes
+---@param opts { hl: string|nil, inline: boolean|nil }|nil hl: highlight group for
+---  the color (default: IpynbMath); inline: render one row tall, e.g. for `$x$`
 ---@return string|nil path PNG file, when the source is already rendered
 ---@return string|nil error Why rendering this source failed
-function M.lookup(source, on_ready)
-  source = unwrap_environment(source)
-  local fg = foreground('IpynbMath')
-  local dpi, cell_width, cell_height = geometry()
-  local key = vim.fn.sha256(table.concat({ TEMPLATE_VERSION, fg, dpi, cell_width, cell_height, source }, '\0'))
+function M.lookup(source, on_ready, opts)
+  opts = opts or {}
+  if not opts.inline then
+    source = unwrap_environment(source)
+  end
+  local fg = foreground(opts.hl or 'IpynbMath')
+  local dpi, cell_width, cell_height, scale = geometry()
+  local parts = { TEMPLATE_VERSION, fg, dpi, cell_width, cell_height, source }
+  if opts.inline then
+    table.insert(parts, 1, 'inline')
+  end
+  local key = vim.fn.sha256(table.concat(parts, '\0'))
   if failed[key] then
     return nil, failed[key]
   end
@@ -411,6 +451,8 @@ function M.lookup(source, on_ready)
     dpi = dpi,
     cell_width = cell_width,
     cell_height = cell_height,
+    scale = scale,
+    inline = opts.inline == true,
   })
   if not flush_scheduled then
     flush_scheduled = true

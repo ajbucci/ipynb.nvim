@@ -101,6 +101,7 @@ local borders = {
   horizontal = '─',
   vertical = '│',
 }
+M.borders = borders
 
 -- Try to load nvim-web-devicons for language icons
 local devicons_ok, devicons = pcall(require, 'nvim-web-devicons')
@@ -308,6 +309,7 @@ function M.setup_highlights(hl_config)
   set_hl(0, 'IpynbOutput', { link = hl_config.output, default = true })
   set_hl(0, 'IpynbOutputError', { link = hl_config.output_error, default = true })
   set_hl(0, 'IpynbMath', { link = hl_config.math or 'IpynbOutput', default = true })
+  set_hl(0, 'IpynbMarkdownMath', { link = hl_config.markdown_math or 'Normal', default = true })
   set_hl(0, 'IpynbExecuting', { link = hl_config.executing, default = true })
   set_hl(0, 'IpynbQueued', { link = hl_config.queued, default = true })
 
@@ -611,6 +613,9 @@ function M.render_cell(state, cell_idx, is_active, target_buf)
       sign_text = borders.vertical,
       sign_hl_group = border_hl,
     })
+  end
+  if buf == state.facade_buf then
+    require('ipynb.markdown_math').set_border_hl(state, cell_idx, border_hl)
   end
 end
 

@@ -139,6 +139,7 @@ function M.refresh(state)
   -- Re-render outputs (includes recreating images)
   local output_mod = require('ipynb.output')
   output_mod.render_all(state)
+  require('ipynb.markdown_math').render_all(state)
 end
 
 ---Insert a cell into the facade buffer and refresh

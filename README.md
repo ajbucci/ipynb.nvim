@@ -12,7 +12,7 @@ A modal Jupyter notebook editor for Neovim.
 - Edit `.ipynb` files as actual notebooks with isolated cell buffers
 - Cell outputs render inline as virtual lines (open in float to copy)
 - Inline image rendering (PNG, JPEG, SVG, etc.)
-- LaTeX outputs (SymPy, `IPython.display.Math`) rendered as images
+- LaTeX rendered as images: outputs (SymPy, `IPython.display.Math`) and math in markdown cells (`$$` blocks and inline `$…$`)
 - Variable inspector with auto-hover (uses Jupyter inspect protocol)
 - Partial language server support (diagnostics, completion, go to definition, rename)
 - Multi-language support (Python, Julia, R, and more)
@@ -109,10 +109,13 @@ The treesitter parser is automatically compiled on first load.
 
 ## 📝 Persistent Markdown Rendering
 
-Markdown cells receive Tree-sitter highlighting out of the box. To render
-headings, links, lists, tables, and LaTeX persistently in Notebook mode, use a
-Markdown renderer that supports injected Tree-sitter languages and configure it
-to attach to the `ipynb` filetype.
+Markdown cells receive Tree-sitter highlighting out of the box, and their math
+is rendered as images in Notebook mode (see [LaTeX Rendering](#-latex-rendering)):
+`$$ … $$` blocks on their own lines as display math, and `$…$` within a line as
+one-row inline math. A cell shows its source again while you edit it. To render
+headings, links, lists, and tables persistently, use a Markdown renderer that
+supports injected Tree-sitter languages and configure it to attach to the
+`ipynb` filetype.
 
 For [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim)
 with lazy.nvim:
@@ -146,6 +149,10 @@ require("render-markdown").setup({
 If a distribution already configures render-markdown.nvim, extend its existing
 plugin specification instead of calling `setup()` a second time. LaTeX
 rendering also requires render-markdown.nvim's optional LaTeX dependencies.
+When a renderer also draws LaTeX in `ipynb` buffers, math gets rendered
+twice: turn its LaTeX off for `ipynb` (for render-markdown.nvim,
+`latex = { enabled = false }` in the `ipynb` override above) or set
+`latex.enabled = false` in ipynb.nvim.
 
 For [markview.nvim](https://github.com/OXY2DEV/markview.nvim), add `ipynb` to
 `preview.filetypes` while retaining its defaults.
@@ -156,20 +163,21 @@ provides the Markdown injections.
 
 ## 🧮 LaTeX Rendering
 
-LaTeX outputs render as images through the same path as image outputs, so
-they need snacks.nvim and a kitty graphics terminal, plus:
+LaTeX outputs and math in markdown cells render as images through the same
+path as image outputs, so they need snacks.nvim and a kitty graphics terminal,
+plus:
 
 - `latex` and `dvisvgm`, with the LaTeX packages `amsmath`, `amsfonts`,
-  `mathtools` and `xcolor` (all part of TeX Live)
+  `mathtools`, `xcolor` and `preview` (all part of TeX Live)
 - `rsvg-convert` (from librsvg)
 
 | Platform | Install |
 |---|---|
 | macOS | `brew install --cask mactex-no-gui && brew install librsvg` |
-| macOS (smaller) | `brew install --cask basictex && brew install librsvg`, then `sudo tlmgr install dvisvgm mathtools xcolor` |
-| Debian / Ubuntu | `sudo apt install texlive-latex-recommended dvisvgm librsvg2-bin` |
-| Fedora | `sudo dnf install texlive-scheme-basic texlive-amsmath texlive-mathtools texlive-xcolor texlive-dvisvgm librsvg2-tools` |
-| Arch | `sudo pacman -S texlive-latexrecommended dvisvgm librsvg` |
+| macOS (smaller) | `brew install --cask basictex && brew install librsvg`, then `sudo tlmgr install dvisvgm preview mathtools xcolor` |
+| Debian / Ubuntu | `sudo apt install texlive-latex-recommended preview-latex-style dvisvgm librsvg2-bin` |
+| Fedora | `sudo dnf install texlive-scheme-basic texlive-amsmath texlive-mathtools texlive-xcolor texlive-preview texlive-dvisvgm librsvg2-tools` |
+| Arch | `sudo pacman -S texlive-latexextra dvisvgm librsvg` |
 
 `:checkhealth ipynb` reports missing programs, and ipynb.nvim warns once when
 it has LaTeX to render but cannot. To render LaTeX as text on purpose, set
@@ -298,6 +306,7 @@ require("ipynb").setup({
     exec_count = "Number",        -- Execution count [N]
     output = "Comment",           -- Output text
     math = "IpynbOutput",         -- Rendered LaTeX outputs
+    markdown_math = "Normal",     -- Rendered math in markdown cells
     hint = "Comment",             -- Cell action keymap hints
     -- For statusline
     output_error = "DiagnosticError",
@@ -483,7 +492,7 @@ If `:lua print(require("snacks").image.supports_terminal())` returns `true` but 
 
 **LaTeX shows as text**
 
-LaTeX outputs need `latex`, `dvisvgm` and `rsvg-convert` on your `PATH` (see [LaTeX Rendering](#-latex-rendering) and `:checkhealth ipynb`) as well as working image support. LaTeX that fails to compile keeps its source and shows the LaTeX error next to it. Rendered images are cached under `images.cache_dir`.
+LaTeX outputs and math in markdown cells need `latex`, `dvisvgm` and `rsvg-convert` on your `PATH` (see [LaTeX Rendering](#-latex-rendering) and `:checkhealth ipynb`) as well as working image support. LaTeX that fails to compile keeps its source and shows the LaTeX error next to it. Rendered images are cached under `images.cache_dir`.
 
 ## 🗺️ Roadmap
 
@@ -495,6 +504,7 @@ LaTeX outputs need `latex`, `dvisvgm` and `rsvg-convert` on your `PATH` (see [La
 - [x] Blocking stdin input prompts (`input()` / `getpass`)
 - [x] Inline image rendering
 - [x] LaTeX output rendering (`text/latex`)
+- [x] Math rendering in markdown cells (`$$` blocks and inline `$…$`)
 - [x] Variable inspector (Jupyter inspect protocol, auto-hover)
 - [x] Partial LSP support (diagnostics, completion, hover, definition, references, rename, formatting, document symbols, signature help, document highlight, inlay hints)
 - [x] Multi-language support (Python, Julia, R, etc.)

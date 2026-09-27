@@ -449,6 +449,9 @@ function M.open(state, mode)
   }
   refresh_edit_window(state)
 
+  -- Show the cell's math source while it is edited
+  require('ipynb.markdown_math').clear_cell(state, cell_idx)
+
   -- Re-render visuals to show active border (must be after edit_state is set)
   local visuals = require('ipynb.visuals')
   visuals.render_all(state)
@@ -1065,6 +1068,7 @@ local function global_undo_redo(state, cmd)
 
     local output_mod = require('ipynb.output')
     output_mod.render_all(state)
+    require('ipynb.markdown_math').render_all(state)
 
     local images_mod = require('ipynb.images')
     if images_mod.is_available() then
@@ -1127,6 +1131,8 @@ function M.close(state)
 
   local visuals = require('ipynb.visuals')
   visuals.render_all(state)
+
+  require('ipynb.markdown_math').render_cell(state, edit.cell_idx)
 
   -- Refresh diagnostics on facade
   require('ipynb.lsp').refresh_facade_diagnostics(state)

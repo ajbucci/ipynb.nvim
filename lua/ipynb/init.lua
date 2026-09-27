@@ -129,6 +129,7 @@ function M.setup(opts)
     callback = function()
       for _, state in pairs(require('ipynb.state').notebooks) do
         require('ipynb.output').render_all(state)
+        require('ipynb.markdown_math').render_all(state)
       end
     end,
   })
@@ -148,6 +149,7 @@ function M.setup(opts)
           vim.defer_fn(function()
             if resizes[buf] == resize and state_mod.notebooks[buf] == state then
               require('ipynb.output').render_all(state)
+              require('ipynb.markdown_math').render_all(state)
             end
           end, 200)
         end

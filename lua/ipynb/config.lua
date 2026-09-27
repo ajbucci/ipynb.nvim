@@ -83,6 +83,7 @@ local M = {}
 ---@field output string Output text (default: 'Comment')
 ---@field output_error string Error output (default: 'DiagnosticError')
 ---@field math string Rendered LaTeX in outputs (default: 'IpynbOutput')
+---@field markdown_math string Rendered LaTeX in markdown cells (default: 'Normal')
 ---@field executing string Executing indicator (default: 'DiagnosticWarn')
 ---@field queued string Queued indicator (default: 'DiagnosticHint')
 ---@field hint string Action hints on active cell border (default: 'Comment')
@@ -168,6 +169,7 @@ M.defaults = {
 		output = "Comment",
 		output_error = "DiagnosticError",
 		math = "IpynbOutput",
+		markdown_math = "Normal",
 		executing = "DiagnosticWarn",
 		queued = "DiagnosticHint",
 		hint = "Comment",
