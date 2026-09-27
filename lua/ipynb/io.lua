@@ -336,6 +336,7 @@ function M.open_notebook(buf, path)
   -- Render existing outputs (including images)
   local output = require('ipynb.output')
   output.render_all(state)
+  require('ipynb.markdown_math').render_all(state)
 
   -- Setup keymaps
   local keymaps = require('ipynb.keymaps')

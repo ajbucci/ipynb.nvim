@@ -123,6 +123,40 @@ function M.setup(opts)
     end,
   })
 
+  -- Re-render images after a colorscheme clears their placeholder highlights
+  vim.api.nvim_create_autocmd('ColorScheme', {
+    group = vim.api.nvim_create_augroup('NotebookColorScheme', { clear = true }),
+    callback = function()
+      for _, state in pairs(require('ipynb.state').notebooks) do
+        require('ipynb.output').render_all(state)
+        require('ipynb.markdown_math').render_all(state)
+      end
+    end,
+  })
+
+  -- Re-render images to fit a resized window, once resizing settles
+  local resizes = {} ---@type table<number, number> Latest resize of each notebook buffer
+  vim.api.nvim_create_autocmd('WinResized', {
+    group = vim.api.nvim_create_augroup('NotebookResize', { clear = true }),
+    callback = function()
+      local state_mod = require('ipynb.state')
+      for _, win in ipairs(vim.v.event.windows or {}) do
+        local buf = vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win)
+        local state = buf and state_mod.notebooks[buf]
+        if state then
+          resizes[buf] = (resizes[buf] or 0) + 1
+          local resize = resizes[buf]
+          vim.defer_fn(function()
+            if resizes[buf] == resize and state_mod.notebooks[buf] == state then
+              require('ipynb.output').render_all(state)
+              require('ipynb.markdown_math').render_all(state)
+            end
+          end, 200)
+        end
+      end
+    end,
+  })
+
   -- Setup user commands
   require('ipynb.commands').setup()
 end

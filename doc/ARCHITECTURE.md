@@ -131,6 +131,8 @@ lua/ipynb/
 ├── kernel.lua         # Jupyter kernel connection (per-notebook state)
 ├── output.lua         # Cell output rendering
 ├── images.lua         # Image output rendering (via snacks.nvim)
+├── latex.lua          # LaTeX to PNG rendering (latex, dvisvgm, rsvg-convert)
+├── markdown_math.lua  # Math in markdown cells rendered as images
 ├── inspector.lua      # Variable inspector (Jupyter inspect protocol)
 ├── folding.lua        # Cell folding support
 ├── picker.lua         # Cell picker (vim.ui.select)
@@ -1410,6 +1412,14 @@ cell.output_extmark = vim.api.nvim_buf_set_extmark(buf, ns, end_line, 0, {
 - Uses actual terminal cell dimensions for accurate sizing
 - Images persist through cell moves, insertions, deletions (via unique cell IDs)
 - Requires terminal with Kitty Graphics Protocol + Unicode placeholder support (kitty, ghostty)
+
+**LaTeX (`latex.lua`, `markdown_math.lua`):**
+
+- `text/latex` outputs and math in markdown cells render through the same image path
+- Sources requested in one tick are typeset as one `latex` document, one page per formula; `dvisvgm` and `rsvg-convert` rasterize each page onto a canvas of whole cells, so kitty never rescales it
+- PNGs are cached by source, color and cell size under `images.cache_dir/latex`
+- Inline math (`$...$`) is one row tall; `$$` blocks hide their source lines (`conceal_lines`) and hang the image rows from the line above
+- A formula that fails to compile keeps its source and shows the LaTeX error
 
 ---
 

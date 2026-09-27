@@ -104,6 +104,49 @@ h.run_test('clear_outputs_resets_stream_cursor_state', function()
   h.assert_eq(cell._stream_state, nil)
 end)
 
+h.run_test('colorscheme_change_redraws_image_outputs', function()
+  local images = require('ipynb.images')
+  local supports, image_lines = images.supports_placeholders, images.get_image_virt_lines
+  local drawn = 0
+  images.supports_placeholders = function()
+    return true
+  end
+  images.get_image_virt_lines = function()
+    drawn = drawn + 1
+    return { { { '[image]', 'Normal' } } }, 1
+  end
+  local ok, err = xpcall(function()
+    h.close_all_notebooks()
+    local path = vim.fn.tempname() .. '.ipynb'
+    vim.fn.writefile({ vim.json.encode({
+      nbformat = 4,
+      nbformat_minor = 5,
+      metadata = vim.empty_dict(),
+      cells = { {
+        cell_type = 'code',
+        id = 'c1',
+        metadata = vim.empty_dict(),
+        execution_count = 1,
+        source = { 'plot()' },
+        outputs = { {
+          output_type = 'display_data',
+          metadata = vim.empty_dict(),
+          data = { ['image/png'] = 'iVBORw0KGgo=', ['text/plain'] = { '<Figure>' } },
+        } },
+      } },
+    }) }, path)
+    h.open_notebook_path(path)
+    local before = drawn
+    h.assert_true(before > 0, 'The image should be drawn on open')
+
+    -- A colorscheme clears the highlight groups placeholders are drawn with.
+    vim.api.nvim_exec_autocmds('ColorScheme', {})
+    h.assert_true(drawn > before, 'The image should be drawn again')
+  end, debug.traceback)
+  images.supports_placeholders, images.get_image_virt_lines = supports, image_lines
+  assert(ok, err)
+end)
+
 local success = h.summary()
 if success then
   vim.cmd('qa!')
